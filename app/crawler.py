@@ -12,6 +12,7 @@ import logging
 import socket
 import ssl
 import time
+import zlib
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional, Union
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -29,6 +30,7 @@ from app.models import (
     LinkKind,
     RedirectHop,
 )
+from app.security import BLOCKED_MESSAGE, BlockedAddressError, make_guarded_transport
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +40,8 @@ UrlValidator = Callable[[str], Union[bool, Awaitable[bool]]]
 DEFAULT_PORTS = {"http": 80, "https": 443}
 TRACKING_PARAMS = {"gclid", "fbclid", "msclkid", "mc_cid", "mc_eid"}
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
-MAX_BODY_BYTES = 5 * 1024 * 1024  # don't hold huge pages in 512 MB of RAM
+MAX_BODY_BYTES = 2 * 1024 * 1024  # decoded bytes; don't hold huge pages in 512 MB of RAM
+HTML_TYPES = {"text/html", "application/xhtml+xml"}
 MAX_LINK_TEXT = 200
 
 
@@ -168,6 +171,8 @@ def classify_exception(exc: BaseException) -> IssueType:
     cur: Optional[BaseException] = exc
     while cur is not None and id(cur) not in seen:
         seen.add(id(cur))
+        if isinstance(cur, BlockedAddressError):
+            return IssueType.BLOCKED
         if isinstance(cur, socket.gaierror):
             return IssueType.DNS_ERROR
         if isinstance(cur, ssl.SSLError):
@@ -197,6 +202,27 @@ class FetchResult:
     encoding: Optional[str] = None
     issue_type: Optional[IssueType] = None  # set for transport errors / blocked
     error: str = ""
+    truncated: bool = False
+
+
+@dataclass
+class _Hop:
+    """One HTTP exchange (a single redirect hop)."""
+
+    status_code: int
+    location: Optional[str] = None
+    content_type: str = ""
+    encoding: Optional[str] = None
+    body: Optional[bytes] = None
+    truncated: bool = False
+
+
+class _NoLimit:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
 
 
 @dataclass
@@ -243,6 +269,12 @@ class Crawler:
         self.warnings_found = 0
         self.robots_skipped = 0
         self.page_limit_reached = False
+        self.pages_truncated = 0
+        self.url_cap_reached = False
+        self.link_cap_pages = 0
+        self.external_cap_reached = False
+        self._external_queued = 0
+        self._host_slots: dict[str, asyncio.Semaphore] = {}
         self._pages_queued = 0
         self._current_url = ""
         self._issues_reported = 0  # how many issues on_progress has delivered
@@ -260,10 +292,13 @@ class Crawler:
         self._queue: asyncio.Queue[_Task] = asyncio.Queue()
         self._sem = asyncio.Semaphore(self.options.concurrency)
         async with httpx.AsyncClient(
-            transport=self._transport,
+            # Every connection goes through the SSRF guard unless a test injects a transport.
+            transport=self._transport if self._transport is not None else make_guarded_transport(),
             timeout=self.options.timeout,
-            headers={"User-Agent": self.options.user_agent},
+            # gzip/deflate only: bodies are decompressed by _read_capped, which knows no others.
+            headers={"User-Agent": self.options.user_agent, "Accept-Encoding": "gzip, deflate"},
             follow_redirects=False,  # followed manually to record chains and validate each hop
+            trust_env=False,  # proxy env vars must not bypass the guard
         ) as client:
             self._client = client
             if not self.cancelled:
@@ -288,6 +323,10 @@ class Crawler:
             cancelled=self.cancelled,
             page_limit_reached=self.page_limit_reached,
             robots_skipped=self.robots_skipped,
+            pages_truncated=self.pages_truncated,
+            url_cap_reached=self.url_cap_reached,
+            link_cap_pages=self.link_cap_pages,
+            external_cap_reached=self.external_cap_reached,
             issues=list(self.issues),
         )
 
@@ -313,6 +352,9 @@ class Crawler:
             self._pending[key].append(occurrence)
             return
 
+        if len(self._outcomes) + len(self._pending) >= self.options.max_urls:
+            self.url_cap_reached = True
+            return
         if kind == LinkKind.PAGE:
             if self._robots is not None and not self._robots.can_fetch(self.options.user_agent, link.url):
                 self.robots_skipped += 1
@@ -322,6 +364,11 @@ class Crawler:
                 self.page_limit_reached = True
                 return
             self._pages_queued += 1
+        elif not same_site:
+            if self._external_queued >= self.options.max_external:
+                self.external_cap_reached = True
+                return
+            self._external_queued += 1
 
         self._pending[key] = [occurrence]
         self._queue.put_nowait(_Task(link.url, key, kind))
@@ -361,8 +408,13 @@ class Crawler:
         if task.kind == LinkKind.PAGE:
             result = await self._fetch(task.url, "GET", read_body=True)
             self.pages_crawled += 1
+            if result.truncated:
+                self.pages_truncated += 1
             if result.body is not None and self._claim_final_url(task, result.final_url):
                 links = extract_links(result.body, result.final_url, self.options.check_images, result.encoding)
+                if len(links) > self.options.max_links_per_page:
+                    self.link_cap_pages += 1
+                    links = links[: self.options.max_links_per_page]
                 for link in links:
                     self._discover(link, found_on=result.final_url)
         else:
@@ -415,6 +467,16 @@ class Crawler:
             log.exception("url_validator raised for %s; blocking", url)
             return False  # fail closed: the validator is a security hook
 
+    def _host_slot(self, url: str):
+        """Politeness: at most per_host_concurrency requests at once to any other host."""
+        host = (urlsplit(url).hostname or "").lower()
+        if not host or is_same_site(url, self.root_host):
+            return _NoLimit()
+        slot = self._host_slots.get(host)
+        if slot is None:
+            slot = self._host_slots[host] = asyncio.Semaphore(self.options.per_host_concurrency)
+        return slot
+
     async def _fetch(self, url: str, method: str, read_body: bool = False, html_only: bool = True) -> FetchResult:
         """Request `url`, following redirects manually (validating each hop)."""
         result = FetchResult(url=url, final_url=url)
@@ -424,41 +486,57 @@ class Crawler:
             while True:
                 if not await self._is_allowed(current):
                     result.issue_type = IssueType.BLOCKED
-                    result.error = "Blocked by URL validator"
+                    result.error = BLOCKED_MESSAGE
                     return result
-                async with self._sem:
+                async with self._host_slot(current), self._sem:
                     started = time.perf_counter()
                     try:
-                        async with self._client.stream(method, current) as resp:
-                            location = resp.headers.get("location")
-                            if resp.status_code in REDIRECT_STATUSES and location:
-                                result.redirects.append(RedirectHop(current, resp.status_code))
-                                if len(result.redirects) > self.options.max_redirects:
-                                    result.issue_type = IssueType.TOO_MANY_REDIRECTS
-                                    result.error = f"More than {self.options.max_redirects} redirects"
-                                    return result
-                                current = normalize_url(location, current) or urljoin(current, location)
-                                result.final_url = current
-                                continue
-                            result.status_code = resp.status_code
-                            result.content_type = resp.headers.get("content-type", "")
-                            result.encoding = resp.charset_encoding
-                            wants_body = read_body and resp.is_success
-                            if html_only:
-                                wants_body = wants_body and "html" in result.content_type.lower()
-                            if wants_body:
-                                result.body = await _read_capped(resp)
-                            return result
+                        # One overall deadline per hop (connect, headers and body), so a
+                        # server dripping a byte at a time can't hold a worker forever.
+                        hop = await asyncio.wait_for(
+                            self._request_once(method, current, read_body, html_only), self.options.timeout
+                        )
                     finally:
                         elapsed += time.perf_counter() - started
                         if self.options.delay:
                             await asyncio.sleep(self.options.delay)
+                if hop.location is not None:
+                    result.redirects.append(RedirectHop(current, hop.status_code))
+                    if len(result.redirects) > self.options.max_redirects:
+                        result.issue_type = IssueType.TOO_MANY_REDIRECTS
+                        result.error = f"More than {self.options.max_redirects} redirects"
+                        return result
+                    current = normalize_url(hop.location, current) or urljoin(current, hop.location)
+                    result.final_url = current
+                    continue
+                result.status_code = hop.status_code
+                result.content_type = hop.content_type
+                result.encoding = hop.encoding
+                result.body = hop.body
+                result.truncated = hop.truncated
+                return result
+        except asyncio.TimeoutError:
+            result.issue_type = IssueType.TIMEOUT
+            result.error = f"No complete response within {self.options.timeout:g}s"
+            return result
         except httpx.HTTPError as exc:
             result.issue_type = classify_exception(exc)
-            result.error = str(exc) or type(exc).__name__
+            # Blocked errors get the generic message; never leak resolved addresses.
+            result.error = BLOCKED_MESSAGE if result.issue_type == IssueType.BLOCKED else (str(exc) or type(exc).__name__)
             return result
         finally:
             result.elapsed_ms = round(elapsed * 1000, 1)
+
+    async def _request_once(self, method: str, url: str, read_body: bool, html_only: bool) -> _Hop:
+        async with self._client.stream(method, url) as resp:
+            location = resp.headers.get("location")
+            if resp.status_code in REDIRECT_STATUSES and location:
+                return _Hop(resp.status_code, location=location)
+            hop = _Hop(resp.status_code, content_type=resp.headers.get("content-type", ""), encoding=resp.charset_encoding)
+            # Status-only checks (external links, images, HEAD fallbacks) never read a body.
+            if read_body and resp.is_success and (not html_only or _is_html(hop.content_type)):
+                hop.body, hop.truncated = await _read_capped(resp)
+            return hop
 
     def _to_issue(self, result: FetchResult, kind: LinkKind) -> Optional[Issue]:
         issue_type = result.issue_type
@@ -498,14 +576,40 @@ class Crawler:
         self._robots = parser
 
 
-async def _read_capped(resp: httpx.Response) -> bytes:
-    chunks, size = [], 0
-    async for chunk in resp.aiter_bytes():
-        chunks.append(chunk)
-        size += len(chunk)
-        if size >= MAX_BODY_BYTES:
-            break
-    return b"".join(chunks)[:MAX_BODY_BYTES]
+def _is_html(content_type: str) -> bool:
+    return content_type.split(";", 1)[0].strip().lower() in HTML_TYPES
+
+
+async def _read_capped(resp: httpx.Response) -> tuple:
+    """Return (body, truncated), never holding more than MAX_BODY_BYTES decoded.
+
+    Decompresses the raw stream ourselves with zlib's max_length so a small
+    gzip/deflate bomb can't expand past the cap in one chunk (httpx's own
+    decoder inflates each chunk fully). Unknown encodings return (None, False).
+    """
+    if resp.is_stream_consumed:
+        # Responses built from in-memory content (tests, mocks) arrive already read and decoded.
+        return resp.content[:MAX_BODY_BYTES], len(resp.content) > MAX_BODY_BYTES
+    encoding = resp.headers.get("content-encoding", "").strip().lower()
+    if encoding in ("", "identity"):
+        decoder = None
+    elif encoding in ("gzip", "x-gzip"):
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    elif encoding == "deflate":
+        decoder = zlib.decompressobj()
+    else:
+        return None, False
+
+    body = bytearray()
+    try:
+        async for chunk in resp.aiter_raw():
+            room = MAX_BODY_BYTES + 1 - len(body)  # one extra byte tells us we overflowed
+            body += decoder.decompress(chunk, room) if decoder else chunk[:room]
+            if len(body) > MAX_BODY_BYTES:
+                return bytes(body[:MAX_BODY_BYTES]), True
+    except zlib.error:
+        return (bytes(body) if body else None), False
+    return bytes(body), False
 
 
 async def crawl(start_url: str, options: Optional[CrawlOptions] = None, **hooks) -> CrawlResult:

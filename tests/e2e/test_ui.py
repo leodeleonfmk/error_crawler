@@ -360,3 +360,44 @@ def test_reduced_motion(servers, browser):
         assert page.evaluate("document.getAnimations().length") == 0
     finally:
         ctx.close()
+
+
+def test_rate_limited_poll_keeps_the_scan_view(servers, watched):
+    _, job = api(servers.app, "POST", "/api/jobs", {"url": servers.site, "check_external": False})
+    wait_status(servers.app, job["id"], "done")
+    w = watched()
+    page = w.page
+    calls = {"n": 0}
+
+    def limited(route):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            route.fulfill(status=429, headers={"retry-after": "1", "content-type": "application/json"},
+                          body='{"error": "You\'re making requests very quickly."}')
+        else:
+            route.continue_()
+
+    page.route("**/api/jobs/*?since=*", limited)
+    page.goto(f"{servers.app}/#/job/{job['id']}")
+    page.wait_for_selector("text=Lots of traffic right now", timeout=5000)
+    assert not page.is_visible('[data-screen="failed"]')
+    screen(page, "results", timeout=10000)
+    assert calls["n"] >= 3
+    w.assert_clean()
+
+
+def test_rate_limit_message_on_start(servers, watched):
+    page = watched().page
+
+    def limited(route):
+        route.fulfill(status=429, headers={"retry-after": "3600", "content-type": "application/json"},
+                      body='{"error": "You\'ve started a lot of scans lately. Try again in about 60 minutes."}')
+
+    page.route("**/api/jobs", limited)
+    page.goto(servers.app)
+    page.fill("#url-input", servers.site)
+    page.click("#scan-btn")
+    expect(page.locator("#form-error")).to_have_text(
+        "You've started a lot of scans lately. Try again in about 60 minutes.")
+    screen(page, "start")
+

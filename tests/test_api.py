@@ -9,14 +9,25 @@ import pytest
 
 from app.jobs import JobManager, JobStatus, _now
 from app.main import create_app
+from app.ratelimit import RateLimits
 from app.models import CrawlResult, CrawlStats, Issue, IssueType, LinkKind
 
 pytestmark = pytest.mark.anyio
+
+# These tests exercise job behavior, not abuse limits (see test_ratelimit.py).
+NO_LIMITS = RateLimits(jobs_per_hour=10_000, active_jobs_per_ip=10_000,
+                       active_jobs_per_domain=10_000, api_per_minute=100_000)
 
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def allow_private_hosts(monkeypatch):
+    # Fake hostnames like a.test; SSRF rules are covered in test_security.py.
+    monkeypatch.setenv("ALLOW_PRIVATE_HOSTS", "1")
 
 
 class FakeCrawl:
@@ -69,7 +80,7 @@ class FakeCrawl:
 async def env():
     fake = FakeCrawl()
     manager = JobManager(crawl_fn=fake)
-    app = create_app(manager)
+    app = create_app(manager, NO_LIMITS)
     await manager.start()  # ASGITransport doesn't run the lifespan handler
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         yield client, manager, fake
@@ -95,7 +106,7 @@ async def test_job_lifecycle(env):
     assert resp.status_code == 201
     job = resp.json()
     assert job["status"] == "queued" and job["queue_position"] == 1
-    assert len(job["id"]) == 10
+    assert len(job["id"]) == 12  # 72 bits from secrets.token_urlsafe
 
     running = await wait_for_status(client, job["id"], "running")
     assert running["queue_position"] is None
@@ -203,12 +214,20 @@ async def test_since_pagination(env):
     assert bad.status_code == 422 and "error" in bad.json()
 
 
-@pytest.mark.parametrize("url", ["", "   ", "not a url", "ftp://example.com/", "mailto:a@b.com", "http://", "https://exa mple.com/"])
-async def test_rejects_bad_urls(env, url):
+@pytest.mark.parametrize("url", ["", "   ", "not a url", "mailto:a@b.com", "http://", "https://exa mple.com/"])
+async def test_rejects_malformed_urls(env, url):
     client, _, _ = env
     resp = await create(client, url)
     assert resp.status_code == 422
     assert "valid http(s) URL" in resp.json()["error"]
+
+
+@pytest.mark.parametrize("url", ["ftp://example.com/", "file:///etc/passwd", "http://user:pw@example.com/"])
+async def test_rejects_disallowed_urls_generically(env, url):
+    client, _, _ = env
+    resp = await create(client, url)
+    assert resp.status_code == 400
+    assert resp.json() == {"error": "This address isn't allowed."}
 
 
 async def test_missing_scheme_defaults_to_https(env):

@@ -14,8 +14,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Awaitable, Callable, Optional
+from urllib.parse import urlsplit
 
-from app.crawler import UrlValidator, crawl
+from app.crawler import UrlValidator, crawl, site_host
 from app.models import CrawlOptions, CrawlResult, CrawlStats, Issue
 from app.security import validate_url
 
@@ -70,6 +71,12 @@ class Job:
     result: Optional[CrawlResult] = None
     error_message: Optional[str] = None
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    client_ip: Optional[str] = None  # for per-IP limits; never exposed by the API
+
+    @property
+    def domain(self) -> str:
+        """Target site for per-domain limits: lowercase host, www stripped, port ignored."""
+        return site_host(urlsplit(self.url).hostname or "")
 
 
 class JobManager:
@@ -115,12 +122,12 @@ class JobManager:
 
     # --- public API ---
 
-    def submit(self, url: str, options: CrawlOptions) -> Job:
+    def submit(self, url: str, options: CrawlOptions, client_ip: Optional[str] = None) -> Job:
         if len(self._queue) >= self.max_queued:
             raise QueueFullError(
                 f"The queue is full ({self.max_queued} crawls waiting). Please try again in a few minutes."
             )
-        job = Job(id=self._new_id(), url=url, options=options)
+        job = Job(id=self._new_id(), url=url, options=options, client_ip=client_ip)
         self.jobs[job.id] = job
         self._queue.append(job.id)
         if self._has_work is not None:
@@ -129,6 +136,15 @@ class JobManager:
 
     def get(self, job_id: str) -> Optional[Job]:
         return self.jobs.get(job_id)
+
+    def active_jobs(self) -> list:
+        return [j for j in self.jobs.values() if j.status in (JobStatus.QUEUED, JobStatus.RUNNING)]
+
+    def active_count_for_ip(self, client_ip: str) -> int:
+        return sum(1 for j in self.active_jobs() if j.client_ip == client_ip)
+
+    def active_count_for_domain(self, domain: str) -> int:
+        return sum(1 for j in self.active_jobs() if j.domain == domain)
 
     def queue_position(self, job: Job) -> Optional[int]:
         """1 = next to run. None if the job isn't waiting."""
@@ -162,7 +178,7 @@ class JobManager:
 
     def _new_id(self) -> str:
         while True:
-            job_id = secrets.token_urlsafe(7)  # 10 url-safe chars
+            job_id = secrets.token_urlsafe(9)  # 72 random bits, 12 url-safe chars; ids are unguessable
             if job_id not in self.jobs:
                 return job_id
 

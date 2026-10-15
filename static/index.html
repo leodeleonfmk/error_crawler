@@ -677,7 +677,8 @@
     if (!Number.isNaN(date)) state.serverOffsetMs = date - Date.now();
     let data = null;
     try { data = await res.json(); } catch { /* non-JSON (e.g. proxy error page) */ }
-    return { ok: res.ok, status: res.status, data };
+    const retryAfterS = Number(res.headers.get("retry-after")) || null;
+    return { ok: res.ok, status: res.status, data, retryAfterS };
   }
 
   const createJob = (body) => api("/api/jobs", { method: "POST", body: JSON.stringify(body) });
@@ -738,8 +739,11 @@
     window.scrollTo({ top: 0 });
   }
 
-  function setConnectionNote(visible) {
-    for (const note of $$(".connection-note")) note.hidden = !visible;
+  function setConnectionNote(visible, text = "Connection hiccup, retrying…") {
+    for (const note of $$(".connection-note")) {
+      note.hidden = !visible;
+      if (visible) note.textContent = text;
+    }
   }
 
   // --- Start -----------------------------------------------------------------
@@ -1018,9 +1022,16 @@
     $("#download-csv").href = `${jobPath}/report.csv`;
     $("#download-html").href = `${jobPath}/report.html`;
 
+    const notes = [];
+    const s = job.summary || {};
+    if (s.page_limit_reached) notes.push(`Stopped at the ${job.options.max_pages}-page limit, so some pages weren’t checked.`);
+    if (s.url_cap_reached) notes.push("This site has more links than we track in one scan, so some weren’t checked.");
+    if (s.external_cap_reached) notes.push("We checked the first few hundred external links; the rest were skipped.");
+    if (s.link_cap_pages) notes.push(`${plural(s.link_cap_pages, "page")} had more links than we read per page; the extras were skipped.`);
+    if (s.pages_truncated) notes.push(`${plural(s.pages_truncated, "page")} ${s.pages_truncated === 1 ? "was" : "were"} very large, so only the first 2 MB was checked for links.`);
     const limitNote = $("#limit-note");
-    limitNote.hidden = !job.summary?.page_limit_reached;
-    limitNote.textContent = `Stopped at the ${job.options.max_pages}-page limit, so some pages weren’t checked.`;
+    limitNote.hidden = notes.length === 0;
+    limitNote.textContent = notes.join(" ");
 
     $("#all-clear").hidden = errors.length > 0;
     $("#all-clear-sub").textContent = warnings.length
@@ -1217,6 +1228,12 @@
 
   function handleJobResponse(res, gen) {
     if (res.status === 404) return renderNotFound();
+    if (res.status === 429) {
+      // Rate limited: keep the current view and try again when the server says so.
+      setConnectionNote(true, "Lots of traffic right now, checking again shortly…");
+      scheduleNext(gen, Math.min(60, res.retryAfterS || 5) * 1000);
+      return;
+    }
     if (!res.ok || !res.data) {
       return renderFailed({ title: "Something went wrong", text: errorMessage(res) });
     }
@@ -1258,10 +1275,10 @@
     else scheduleNext(gen);
   }
 
-  function scheduleNext(gen) {
+  function scheduleNext(gen, delayMs) {
     clearTimeout(state.pollTimer);
     if (!state.polling || gen !== state.generation) return;
-    state.pollTimer = setTimeout(() => poll(gen), document.hidden ? HIDDEN_POLL_MS : POLL_MS);
+    state.pollTimer = setTimeout(() => poll(gen), delayMs ?? (document.hidden ? HIDDEN_POLL_MS : POLL_MS));
   }
 
   function pollSoon() {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -9,6 +10,18 @@ from typing import Optional
 
 MAX_PAGES_HARD_CAP = 500
 USER_AGENT = "SiteLinkChecker/1.0"
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+def default_user_agent() -> str:
+    contact = os.environ.get("CONTACT_URL", "").strip()
+    return f"{USER_AGENT} (+{contact})" if contact else USER_AGENT
 
 
 class LinkKind(str, Enum):
@@ -69,13 +82,19 @@ class CrawlOptions:
     timeout: float = 10.0
     delay: float = 0.25  # seconds each worker waits after a request
     max_redirects: int = 5
-    user_agent: str = USER_AGENT
+    user_agent: str = field(default_factory=default_user_agent)
+    # Resource caps (not user-settable through the API; env-configurable).
+    max_urls: int = field(default_factory=lambda: _env_int("MAX_URLS_PER_JOB", 5000))
+    max_links_per_page: int = field(default_factory=lambda: _env_int("MAX_LINKS_PER_PAGE", 2000))
+    max_external: int = field(default_factory=lambda: _env_int("MAX_EXTERNAL_PER_JOB", 300))
+    per_host_concurrency: int = field(default_factory=lambda: _env_int("PER_HOST_CONCURRENCY", 2))
 
     def __post_init__(self) -> None:
         self.max_pages = max(1, min(int(self.max_pages), MAX_PAGES_HARD_CAP))
         self.concurrency = max(1, int(self.concurrency))
-        self.max_redirects = max(0, int(self.max_redirects))
+        self.max_redirects = max(0, min(int(self.max_redirects), 5))
         self.delay = max(0.0, float(self.delay))
+        self.per_host_concurrency = max(1, int(self.per_host_concurrency))
 
 
 @dataclass
@@ -102,6 +121,10 @@ class CrawlResult:
     cancelled: bool = False
     page_limit_reached: bool = False
     robots_skipped: int = 0
+    pages_truncated: int = 0  # HTML bodies cut off at the size cap
+    url_cap_reached: bool = False
+    link_cap_pages: int = 0  # pages with more links than we parse
+    external_cap_reached: bool = False
     issues: list[Issue] = field(default_factory=list)
 
     @property

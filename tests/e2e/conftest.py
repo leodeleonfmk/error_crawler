@@ -51,10 +51,21 @@ def servers(tmp_path_factory):
     _write_big_site(big_dir)
     site_port, big_port, app_port = _free_port(), _free_port(), _free_port()
     quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    # Only this server process gets the dev escape hatch (the fixture sites are on
+    # 127.0.0.1) and relaxed limits (the tests queue several scans from one IP).
+    app_env = {
+        **os.environ,
+        "ALLOW_PRIVATE_HOSTS": "1",
+        "RATE_LIMIT_JOBS_PER_HOUR": "1000",
+        "RATE_LIMIT_ACTIVE_JOBS_PER_IP": "100",
+        "RATE_LIMIT_ACTIVE_JOBS_PER_DOMAIN": "100",
+        "RATE_LIMIT_API_PER_MINUTE": "100000",
+    }
     procs = [
         subprocess.Popen([sys.executable, "-m", "http.server", str(site_port), "--bind", "127.0.0.1", "-d", str(SITE_DIR)], **quiet),
         subprocess.Popen([sys.executable, "-m", "http.server", str(big_port), "--bind", "127.0.0.1", "-d", str(big_dir)], **quiet),
-        subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(app_port)], cwd=ROOT, **quiet),
+        subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(app_port)],
+                         cwd=ROOT, env=app_env, **quiet),
     ]
     try:
         ns = SimpleNamespace(

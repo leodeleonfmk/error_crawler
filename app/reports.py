@@ -379,6 +379,14 @@ def build_html(job, generated_at: Optional[datetime] = None) -> str:
     out.append(f"<p>Options: {_e(_options_text(job.options))}.</p>")
     if result and result.page_limit_reached:
         out.append(f"<p>The {job.options.max_pages}-page limit was reached, so some pages weren’t checked.</p>")
+    if result and result.url_cap_reached:
+        out.append("<p>The per-scan link limit was reached, so some links weren’t checked.</p>")
+    if result and result.external_cap_reached:
+        out.append(f"<p>Only the first {job.options.max_external} external links were checked.</p>")
+    if result and result.link_cap_pages:
+        out.append(f"<p>{_plural(result.link_cap_pages, 'page')} had more than {job.options.max_links_per_page} links; the extras were skipped.</p>")
+    if result and result.pages_truncated:
+        out.append(f"<p>{_plural(result.pages_truncated, 'page')} exceeded 2 MB; only the first 2 MB was checked.</p>")
     if result and result.robots_skipped:
         out.append(f"<p>{_plural(result.robots_skipped, 'page')} skipped because of robots.txt.</p>")
     out.append("</div></footer></body></html>")

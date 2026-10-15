@@ -12,6 +12,7 @@ from typing import Optional
 
 from app.crawler import crawl
 from app.models import MAX_PAGES_HARD_CAP, CrawlOptions, CrawlResult, CrawlStats, Issue
+from app.security import make_guarded_transport
 
 
 def _truncate(text: str, width: int) -> str:
@@ -117,8 +118,9 @@ async def main_async(args: argparse.Namespace) -> CrawlResult:
         timeout=args.timeout,
     )
     printer = ProgressPrinter()
+    hooks = {"transport": make_guarded_transport(allow_private=True)} if args.allow_private else {}
     try:
-        result = await crawl(args.url, options, on_progress=printer, cancel_event=cancel)
+        result = await crawl(args.url, options, on_progress=printer, cancel_event=cancel, **hooks)
     finally:
         printer.done()
     return result
@@ -135,6 +137,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--timeout", type=float, default=10.0)
     p.add_argument("--limit", type=int, default=50, help="max issues to print in the summary")
     p.add_argument("--json", metavar="PATH", help="write the full result as JSON")
+    p.add_argument("--allow-private", action="store_true",
+                   help="allow private/loopback hosts and any port (intranet or local dev sites)")
     return p.parse_args(argv)
 
 
