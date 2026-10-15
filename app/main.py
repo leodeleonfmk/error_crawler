@@ -15,13 +15,14 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException
 
 from app.crawler import normalize_url
-from app.jobs import Job, JobManager, QueueFullError
+from app.jobs import Job, JobManager, JobStatus, QueueFullError
 from app.models import MAX_PAGES_HARD_CAP, CrawlOptions
+from app.reports import build_csv, build_html, build_message_page, report_filename
 from app.security import validate_url
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,14 @@ JOB_NOT_FOUND = (
     "Job not found. Reports are kept for 24 hours and can be lost when the server restarts; "
     "please start a new check."
 )
+REPORT_STATUSES = (JobStatus.DONE, JobStatus.CANCELLED)
+# The HTML report contains attacker-controlled text; lock it down even though it's escaped.
+REPORT_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex",
+    "Referrer-Policy": "no-referrer",
+}
 
 
 class JobCreate(BaseModel):
@@ -166,6 +175,57 @@ def create_app(manager: Optional[JobManager] = None) -> FastAPI:
     async def cancel_job(job_id: str):
         job = manager.cancel(get_job_or_404(job_id))
         return job_payload(manager, job, since=len(job.issues))
+
+    # --- Reports ---
+
+    def get_report_job(job_id: str) -> Job:
+        job = get_job_or_404(job_id)
+        if job.status not in REPORT_STATUSES:
+            if job.status == JobStatus.FAILED:
+                raise HTTPException(409, "This scan failed, so there's no report.")
+            raise HTTPException(409, f"The report isn't ready yet: the scan is still {job.status.value}.")
+        return job
+
+    def attachment(filename: str) -> dict:
+        return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    @app.get("/api/jobs/{job_id}/report.csv")
+    async def report_csv(job_id: str):
+        job = get_report_job(job_id)
+        return Response(
+            build_csv(job).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers=attachment(report_filename(job, "csv")),
+        )
+
+    @app.get("/api/jobs/{job_id}/report.html")
+    async def report_html_download(job_id: str):
+        job = get_report_job(job_id)
+        return HTMLResponse(build_html(job), headers={**REPORT_HEADERS, **attachment(report_filename(job, "html"))})
+
+    @app.get("/report/{job_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def report_page(job_id: str):
+        job = manager.get(job_id)
+        if job is None:
+            page = build_message_page(
+                "This report has expired",
+                "Reports are temporary: they're deleted after 24 hours and are lost when the server restarts. "
+                "Run a new scan to get a fresh one.",
+                "/", "Start a new scan",
+            )
+            return HTMLResponse(page, status_code=404, headers=REPORT_HEADERS)
+        if job.status not in REPORT_STATUSES:
+            if job.status == JobStatus.FAILED:
+                page = build_message_page("This scan failed", job.error_message or "There's no report for this scan.",
+                                          "/", "Start a new scan")
+            else:
+                page = build_message_page(
+                    "This scan is still in progress",
+                    f"The report will be ready when the scan finishes (it's {job.status.value} now).",
+                    f"/#/job/{job.id}", "Watch it live",
+                )
+            return HTMLResponse(page, status_code=409, headers=REPORT_HEADERS)
+        return HTMLResponse(build_html(job), headers=REPORT_HEADERS)
 
     return app
 

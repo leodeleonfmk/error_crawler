@@ -138,11 +138,6 @@
     .btn-outline { background: transparent; color: inherit; box-shadow: inset 0 0 0 1.5px currentColor; }
     .btn-outline:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-    .btn[aria-disabled="true"] {
-      background: transparent; color: var(--text-muted); box-shadow: inset 0 0 0 1.5px var(--border);
-      border: 0; cursor: not-allowed; transform: none; background-image: none;
-    }
-    .btn[aria-disabled="true"]::after { content: "Soon"; font-size: 0.62rem; letter-spacing: 0.1em; padding: 0.1rem 0.45rem; border-radius: 9999px; background: var(--surface-muted); border: 1px solid var(--border); }
     .btn .arrow { font-size: 1rem; line-height: 1; letter-spacing: 0; }
     .link-tertiary {
       background: none; border: 0; padding: 0.25rem 0; cursor: pointer; color: var(--text);
@@ -244,6 +239,16 @@
     .notice-error { background: var(--error-bg); color: var(--error-ink); border-color: color-mix(in srgb, var(--error) 40%, transparent); }
     a.ext { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; }
     a.ext:hover { text-decoration-color: currentColor; }
+
+    /* Toast */
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; z-index: 50; width: max-content; max-width: calc(100vw - 32px);
+      transform: translate(-50%, 0); padding: 0.8rem 1.2rem; border-radius: 16px;
+      background: var(--navy); color: var(--cream); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      font-size: 0.9rem; transition: opacity .2s ease, transform .2s ease;
+    }
+    .toast[data-state="hidden"] { opacity: 0; transform: translate(-50%, 8px); pointer-events: none; }
+    @media (prefers-color-scheme: dark) { .toast { background: var(--cream); color: var(--navy); } }
 
     /* Motion */
     .screen-in { animation: screen-in .35s ease both; }
@@ -423,11 +428,11 @@
       <p id="limit-note" class="mt-4 text-sm muted" hidden></p>
 
       <div class="mt-6 flex flex-wrap gap-3">
-        <span title="Coming soon"><button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="coming-soon">Download CSV</button></span>
-        <span title="Coming soon"><button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="coming-soon">Download HTML report</button></span>
-        <span title="Coming soon"><button type="button" class="btn btn-outline" aria-disabled="true" aria-describedby="coming-soon">Copy share link</button></span>
-        <span id="coming-soon" class="sr-only">Coming soon</span>
+        <a class="btn btn-secondary" id="download-csv" href="#" download>Download CSV</a>
+        <a class="btn btn-secondary" id="download-html" href="#" download>Download HTML report</a>
+        <button type="button" class="btn btn-outline" data-action="copy-share">Copy share link</button>
       </div>
+      <p class="mt-3 text-sm muted">Downloads are permanent. The share link is temporary.</p>
 
       <div id="all-clear" class="success-card mt-10 px-6 sm:px-12 py-12 text-center" hidden>
         <svg class="mx-auto mb-5" width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
@@ -480,6 +485,8 @@
       </div>
     </section>
   </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" data-state="hidden"></div>
 
   <footer class="border-t hairline">
     <div class="max-w-5xl mx-auto px-4 sm:px-6 py-6 text-sm muted flex flex-wrap justify-between gap-2">
@@ -1007,6 +1014,9 @@
     $("#results-sub").textContent = job.url;
 
     renderSummaryCards(job, errors, warnings);
+    const jobPath = `/api/jobs/${encodeURIComponent(job.id)}`;
+    $("#download-csv").href = `${jobPath}/report.csv`;
+    $("#download-html").href = `${jobPath}/report.html`;
 
     const limitNote = $("#limit-note");
     limitNote.hidden = !job.summary?.page_limit_reached;
@@ -1283,6 +1293,50 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Sharing
+  // ---------------------------------------------------------------------------
+  function shareUrl() {
+    return new URL(`/report/${encodeURIComponent(state.jobId)}`, location.origin).href;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch { /* fall through to the legacy path */ }
+    }
+    // Non-secure contexts (plain http on a LAN IP, etc.) have no clipboard API.
+    const input = h("input", { value: text, readonly: true, "aria-hidden": "true", style: "position:fixed;top:0;left:0;opacity:0" });
+    document.body.append(input);
+    input.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    input.remove();
+    return ok;
+  }
+
+  async function copyShareLink() {
+    if (!state.jobId) return;
+    const url = shareUrl();
+    const ok = await copyText(url);
+    showToast(ok
+      ? "Link copied. Temporary: it expires after 24 hours or when the server restarts."
+      : `Couldn’t copy automatically. Here’s the link: ${url}`, ok ? 5000 : 12000);
+  }
+
+  function showToast(message, durationMs = 5000) {
+    const toast = $("#toast");
+    toast.textContent = message;
+    toast.dataset.state = "visible";
+    clearTimeout(state.toastTimer);
+    state.toastTimer = setTimeout(() => {
+      toast.dataset.state = "hidden";
+      state.toastTimer = setTimeout(() => { toast.textContent = ""; }, 300);  // after the fade
+    }, durationMs);
+  }
+
+  // ---------------------------------------------------------------------------
   // Routing (#/job/<id>)
   // ---------------------------------------------------------------------------
   function route() {
@@ -1312,9 +1366,8 @@
       const action = e.target.closest("[data-action]")?.dataset.action;
       if (action === "cancel") onCancel();
       else if (action === "new-scan") goToStart();
+      else if (action === "copy-share") copyShareLink();
     });
-    // "Coming soon" buttons are aria-disabled (not disabled) so their tooltip still shows.
-    for (const btn of $$('button[aria-disabled="true"]')) btn.addEventListener("click", (e) => e.preventDefault());
     window.addEventListener("hashchange", route);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) pollSoon(); });
     route();

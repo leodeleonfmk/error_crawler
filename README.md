@@ -29,6 +29,11 @@ curl 'localhost:8000/api/jobs/<id>?since=0'
 # Cancel a queued or running crawl (partial results are kept)
 curl -X POST localhost:8000/api/jobs/<id>/cancel
 
+# Reports (finished or cancelled jobs only)
+curl -OJ localhost:8000/api/jobs/<id>/report.csv
+curl -OJ localhost:8000/api/jobs/<id>/report.html
+open http://localhost:8000/report/<id>     # shareable page, expires with the job
+
 curl localhost:8000/health
 ```
 
@@ -44,4 +49,13 @@ python cli.py https://example.com --max-pages 100 [--check-images] [--no-externa
 
 ```sh
 pytest
+```
+
+Browser tests (Playwright) live in `tests/e2e/` and are skipped by default. They start
+their own uvicorn and fixture sites on free ports:
+
+```sh
+pytest -m e2e                                  # uses installed Google Chrome
+PLAYWRIGHT_CHANNEL= pytest -m e2e              # or Playwright's Chromium (run `playwright install chromium` first)
+E2E_SCREENSHOTS=/tmp/shots pytest -m e2e       # also save screenshots
 ```

@@ -1,0 +1,8 @@
+<!doctype html>
+<title>Hostile link text</title>
+<!-- Every payload below must show up as plain text in the UI and reports. -->
+<a href="/xss1">&lt;script&gt;window.__xss=1;alert(1)&lt;/script&gt;</a>
+<a href="/xss2"><img src="/nope.png" alt="<img src=x onerror=&quot;window.__xss=2;alert(2)&quot;>"></a>
+<a href='/xss3?q="><img src=x onerror=window.__xss=3>'>quote breaker</a>
+<a href="/xss4">&lt;b onmouseover=window.__xss=4&gt;hover me&lt;/b&gt;</a>
+<a href="/formula">=HYPERLINK("http://evil.example","click me")</a>

@@ -20,3 +20,14 @@ page-loading errors, shows live progress, and offers a downloadable report.
 - Public page: SSRF protection and abuse limits are required (added in a later step).
 - Crawler must be usable standalone (CLI) and from the web layer via callbacks.
 - Write small tests for the core logic (pytest).
+
+## Reports
+- Built by pure functions in app/reports.py (group_issues, build_csv, build_html); no web code there.
+- GET /api/jobs/{id}/report.csv and /report.html: downloads (Content-Disposition: attachment),
+  named link-check_<domain>_<YYYY-MM-DD>.<ext>.
+- GET /report/{id}: the same HTML inline, as a read-only share page (no JS).
+- Only for done or cancelled jobs: 409 while queued/running/failed, 404 for unknown ids
+  (JSON on /api routes, a branded HTML page on /report/{id}).
+- Crawled data is untrusted: HTML-escape everything, link only http(s) URLs, neutralize CSV
+  formula cells. HTML reports are served with a strict CSP (default-src 'none').
+- Share links are temporary (in-memory jobs, 24h cleanup, lost on restart); downloads are permanent.

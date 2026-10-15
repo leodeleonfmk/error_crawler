@@ -1,6 +1,7 @@
 """API + JobManager tests. A fake crawl function stands in for the real crawler."""
 
 import asyncio
+import re
 from datetime import timedelta
 
 import httpx
@@ -273,3 +274,107 @@ async def test_cleanup_removes_old_finished_jobs():
     old.finished_at = _now() - timedelta(hours=25)
     assert manager.cleanup() == 1
     assert set(manager.jobs) == {recent.id, waiting.id}
+
+
+# --- Reports ---
+
+REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+
+
+async def finished_job(client, fake, url="https://a.test/"):
+    job_id = (await create(client, url)).json()["id"]
+    running = await wait_for_status(client, job_id, "running")
+    fake.release(running["url"])  # the API stores the normalized URL
+    await wait_for_status(client, job_id, "done")
+    return job_id
+
+
+def assert_report_headers(resp):
+    assert resp.headers["content-security-policy"] == REPORT_CSP
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-robots-tag"] == "noindex"
+    assert resp.headers["referrer-policy"] == "no-referrer"
+
+
+async def test_csv_download(env):
+    client, _, fake = env
+    job_id = await finished_job(client, fake)
+    resp = await client.get(f"/api/jobs/{job_id}/report.csv")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert re.fullmatch(r'attachment; filename="link-check_a\.test_\d{4}-\d{2}-\d{2}\.csv"',
+                        resp.headers["content-disposition"])
+    assert resp.content.startswith(b"\xef\xbb\xbf")
+    assert resp.text.count("\n") == 1 + 3  # header + 3 issues
+
+
+async def test_html_download_and_share_page(env):
+    client, _, fake = env
+    job_id = await finished_job(client, fake)
+    download = await client.get(f"/api/jobs/{job_id}/report.html")
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("text/html")
+    assert download.headers["content-disposition"].startswith('attachment; filename="link-check_a.test_')
+    assert_report_headers(download)
+
+    page = await client.get(f"/report/{job_id}")
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert "content-disposition" not in page.headers
+    assert_report_headers(page)
+    assert "https://a.test/broken2" in page.text
+
+
+async def test_reports_for_cancelled_job(env):
+    client, _, _ = env
+    job_id = (await create(client, "https://a.test/")).json()["id"]
+    await wait_for_status(client, job_id, "running")
+    await client.post(f"/api/jobs/{job_id}/cancel")
+    await wait_for_status(client, job_id, "cancelled")
+    assert (await client.get(f"/api/jobs/{job_id}/report.csv")).status_code == 200
+    page = await client.get(f"/report/{job_id}")
+    assert page.status_code == 200 and "Partial results" in page.text
+
+
+async def test_reports_not_ready_while_running(env):
+    client, _, _ = env
+    job_id = (await create(client, "https://a.test/")).json()["id"]
+    await wait_for_status(client, job_id, "running")
+    for path in ("report.csv", "report.html"):
+        resp = await client.get(f"/api/jobs/{job_id}/{path}")
+        assert resp.status_code == 409
+        assert "still running" in resp.json()["error"]
+    page = await client.get(f"/report/{job_id}")
+    assert page.status_code == 409
+    assert page.headers["content-type"].startswith("text/html")
+    assert f'href="/#/job/{job_id}"' in page.text
+    assert_report_headers(page)
+
+
+async def test_reports_for_failed_job(env):
+    client, _, _ = env
+    job_id = (await create(client, "https://crash.test/")).json()["id"]
+    await wait_for_status(client, job_id, "failed")
+    assert (await client.get(f"/api/jobs/{job_id}/report.csv")).status_code == 409
+    assert (await client.get(f"/report/{job_id}")).status_code == 409
+
+
+async def test_reports_unknown_job(env):
+    client, _, _ = env
+    for path in ("report.csv", "report.html"):
+        resp = await client.get(f"/api/jobs/nope/{path}")
+        assert resp.status_code == 404 and "restarts" in resp.json()["error"]
+    page = await client.get("/report/nope")
+    assert page.status_code == 404
+    assert page.headers["content-type"].startswith("text/html")
+    assert "24 hours" in page.text and "restarts" in page.text
+    assert_report_headers(page)
+
+
+async def test_report_filename_sanitized(env):
+    client, _, fake = env
+    job_id = await finished_job(client, fake, url="https://Sub_Domain.a.test:8443/x")
+    disposition = (await client.get(f"/api/jobs/{job_id}/report.csv")).headers["content-disposition"]
+    filename = re.search(r'filename="([^"]+)"', disposition).group(1)
+    assert re.fullmatch(r"[a-z0-9._-]+", filename)
+    assert filename.startswith("link-check_sub_domain.a.test_")  # uppercase and port dropped
