@@ -27,6 +27,7 @@ from app.models import (
     CrawlStats,
     Issue,
     IssueType,
+    ROBOTS_TOKEN,
     LinkKind,
     RedirectHop,
 )
@@ -42,6 +43,21 @@ TRACKING_PARAMS = {"gclid", "fbclid", "msclkid", "mc_cid", "mc_eid"}
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 MAX_BODY_BYTES = 2 * 1024 * 1024  # decoded bytes; don't hold huge pages in 512 MB of RAM
 HTML_TYPES = {"text/html", "application/xhtml+xml"}
+
+# Diagnostics for refused requests: a small allowlist, never bodies or cookies.
+DIAGNOSTIC_HEADERS = ("server", "cf-ray", "cf-mitigated", "x-sucuri-id", "x-datadome", "via", "retry-after")
+DIAGNOSTIC_PREFIXES = ("x-akamai-",)
+MAX_DIAGNOSTIC_HEADERS = 12
+MAX_HEADER_VALUE = 200
+# Statuses that usually mean "you're a bot" rather than "this link is broken". 999 is LinkedIn's.
+BLOCKING_STATUSES = {401, 403, 429, 999}
+BLOCKED_BY_SITE_MESSAGE = "This site blocks automated checks, so we can't tell if the link works."
+REQUEST_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    # gzip/deflate only: bodies are decompressed by _read_capped, which knows no others.
+    "Accept-Encoding": "gzip, deflate",
+}
 MAX_LINK_TEXT = 200
 
 
@@ -153,6 +169,35 @@ def _clean(text: str) -> str:
 # --- Error classification ----------------------------------------------------
 
 
+def diagnostic_headers(headers: httpx.Headers) -> dict:
+    out: dict = {}
+    for name, value in headers.multi_items():
+        name = name.lower()
+        if (name in DIAGNOSTIC_HEADERS or name.startswith(DIAGNOSTIC_PREFIXES)) and name not in out:
+            if len(out) >= MAX_DIAGNOSTIC_HEADERS:
+                break
+            out[name] = value[:MAX_HEADER_VALUE]
+    return out
+
+
+def protection_hint(headers: dict) -> str:
+    """Best guess at which WAF/bot-protection answered, from diagnostic headers."""
+    server = headers.get("server", "").lower()
+    if "cf-ray" in headers or "cf-mitigated" in headers or "cloudflare" in server:
+        return "cloudflare"
+    if any(name.startswith("x-akamai-") for name in headers) or "akamai" in server:
+        return "akamai"
+    if "x-sucuri-id" in headers or "sucuri" in server:
+        return "sucuri"
+    if "x-datadome" in headers or "datadome" in server:
+        return "datadome"
+    return "unknown"
+
+
+def is_blocking_response(status_code: Optional[int], headers: dict) -> bool:
+    return status_code in BLOCKING_STATUSES or "cf-mitigated" in headers
+
+
 def classify_status(status_code: int) -> Optional[IssueType]:
     if 400 <= status_code < 500:
         return IssueType.HTTP_4XX
@@ -203,6 +248,7 @@ class FetchResult:
     issue_type: Optional[IssueType] = None  # set for transport errors / blocked
     error: str = ""
     truncated: bool = False
+    response_headers: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -215,6 +261,7 @@ class _Hop:
     encoding: Optional[str] = None
     body: Optional[bytes] = None
     truncated: bool = False
+    response_headers: dict = field(default_factory=dict)
 
 
 class _NoLimit:
@@ -273,6 +320,8 @@ class Crawler:
         self.url_cap_reached = False
         self.link_cap_pages = 0
         self.external_cap_reached = False
+        self.start_blocked = False
+        self.start_protection_hint: Optional[str] = None
         self._external_queued = 0
         self._host_slots: dict[str, asyncio.Semaphore] = {}
         self._pages_queued = 0
@@ -296,7 +345,7 @@ class Crawler:
             transport=self._transport if self._transport is not None else make_guarded_transport(),
             timeout=self.options.timeout,
             # gzip/deflate only: bodies are decompressed by _read_capped, which knows no others.
-            headers={"User-Agent": self.options.user_agent, "Accept-Encoding": "gzip, deflate"},
+            headers={"User-Agent": self.options.user_agent, **REQUEST_HEADERS},
             follow_redirects=False,  # followed manually to record chains and validate each hop
             trust_env=False,  # proxy env vars must not bypass the guard
         ) as client:
@@ -327,6 +376,8 @@ class Crawler:
             url_cap_reached=self.url_cap_reached,
             link_cap_pages=self.link_cap_pages,
             external_cap_reached=self.external_cap_reached,
+            start_blocked=self.start_blocked,
+            start_protection_hint=self.start_protection_hint,
             issues=list(self.issues),
         )
 
@@ -356,7 +407,9 @@ class Crawler:
             self.url_cap_reached = True
             return
         if kind == LinkKind.PAGE:
-            if self._robots is not None and not self._robots.can_fetch(self.options.user_agent, link.url):
+            # robotparser matches only the UA text before the first "/", which would be
+            # "Mozilla"; pass our token so "User-agent: SiteLinkChecker" rules apply.
+            if self._robots is not None and not self._robots.can_fetch(ROBOTS_TOKEN, link.url):
                 self.robots_skipped += 1
                 self._outcomes[key] = None
                 return
@@ -408,6 +461,11 @@ class Crawler:
         if task.kind == LinkKind.PAGE:
             result = await self._fetch(task.url, "GET", read_body=True)
             self.pages_crawled += 1
+            if (task.key == url_key(self.start_url) and result.issue_type is None
+                    and is_blocking_response(result.status_code, result.response_headers)):
+                # The site refuses us from the first page; the job layer reports it as failed.
+                self.start_blocked = True
+                self.start_protection_hint = protection_hint(result.response_headers)
             if result.truncated:
                 self.pages_truncated += 1
             if result.body is not None and self._claim_final_url(task, result.final_url):
@@ -422,7 +480,8 @@ class Crawler:
             if result.status_code in (405, 501):
                 result = await self._fetch(task.url, "GET")
         self.links_checked += 1
-        self._resolve(task.key, self._to_issue(result, task.kind))
+        off_site = not is_same_site(task.url, self.root_host)
+        self._resolve(task.key, self._to_issue(result, task.kind, off_site))
 
     def _claim_final_url(self, task: _Task, final_url: str) -> bool:
         """After a redirect, mark the target as seen. False if it was already crawled."""
@@ -514,6 +573,7 @@ class Crawler:
                 result.encoding = hop.encoding
                 result.body = hop.body
                 result.truncated = hop.truncated
+                result.response_headers = hop.response_headers
                 return result
         except asyncio.TimeoutError:
             result.issue_type = IssueType.TIMEOUT
@@ -533,14 +593,20 @@ class Crawler:
             if resp.status_code in REDIRECT_STATUSES and location:
                 return _Hop(resp.status_code, location=location)
             hop = _Hop(resp.status_code, content_type=resp.headers.get("content-type", ""), encoding=resp.charset_encoding)
+            if resp.status_code >= 400 or "cf-mitigated" in resp.headers:
+                hop.response_headers = diagnostic_headers(resp.headers)
             # Status-only checks (external links, images, HEAD fallbacks) never read a body.
             if read_body and resp.is_success and (not html_only or _is_html(hop.content_type)):
                 hop.body, hop.truncated = await _read_capped(resp)
             return hop
 
-    def _to_issue(self, result: FetchResult, kind: LinkKind) -> Optional[Issue]:
+    def _to_issue(self, result: FetchResult, kind: LinkKind, off_site: bool = False) -> Optional[Issue]:
         issue_type = result.issue_type
         error = result.error
+        if issue_type is None and off_site and is_blocking_response(result.status_code, result.response_headers):
+            # Bot protection on someone else's site isn't a broken link: say so calmly.
+            issue_type = IssueType.BLOCKED_BY_SITE
+            error = BLOCKED_BY_SITE_MESSAGE
         if issue_type is None and result.status_code is not None:
             issue_type = classify_status(result.status_code)
             if issue_type:
@@ -562,6 +628,8 @@ class Crawler:
             error=error,
             response_time_ms=result.elapsed_ms,
             redirect_chain=chain,
+            response_headers=dict(result.response_headers),
+            protection_hint=protection_hint(result.response_headers) if result.response_headers else None,
         )
 
     async def _load_robots(self) -> None:

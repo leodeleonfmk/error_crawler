@@ -68,7 +68,8 @@ def read_csv(text):
 def test_csv_header_and_one_row_per_occurrence():
     rows = read_csv(build_csv(make_job(sample_issues())))
     assert rows[0] == ["broken_url", "type", "status_code", "error_detail", "found_on_page",
-                       "link_text", "response_time_ms", "redirect_chain", "severity"]
+                       "link_text", "response_time_ms", "redirect_chain", "severity",
+                       "protection_hint", "response_headers"]
     assert len(rows) == 1 + 4
     assert rows[1][:3] == ["https://example.com/gone", "http_4xx", "404"]
     assert rows[1][8] == "error"

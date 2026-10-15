@@ -29,13 +29,15 @@ TYPE_LABELS = {
     IssueType.TOO_MANY_REDIRECTS: "Too many redirects",
     IssueType.REDIRECT_CHAIN: "Redirect chain",
     IssueType.BLOCKED: "Blocked",
+    IssueType.BLOCKED_BY_SITE: "Blocked by site",
 }
 TYPE_ORDER = list(TYPE_LABELS)
+PROTECTION_LABELS = {"cloudflare": "Cloudflare", "akamai": "Akamai", "sucuri": "Sucuri", "datadome": "DataDome"}
 KIND_LABELS = {LinkKind.PAGE: "Page", LinkKind.EXTERNAL: "External", LinkKind.IMAGE: "Image"}
 
 CSV_COLUMNS = [
     "broken_url", "type", "status_code", "error_detail", "found_on_page",
-    "link_text", "response_time_ms", "redirect_chain", "severity",
+    "link_text", "response_time_ms", "redirect_chain", "severity", "protection_hint", "response_headers",
 ]
 FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
@@ -58,6 +60,8 @@ class IssueGroup:
     kind: LinkKind
     response_time_ms: Optional[float]
     chain: list[RedirectHop]
+    response_headers: dict = field(default_factory=dict)
+    protection_hint: Optional[str] = None
     sources: list[Source] = field(default_factory=list)
 
     @property
@@ -89,6 +93,8 @@ def group_issues(issues: Iterable[Issue]) -> GroupedIssues:
                 kind=issue.kind,
                 response_time_ms=issue.response_time_ms,
                 chain=list(issue.redirect_chain),
+                response_headers=dict(issue.response_headers),
+                protection_hint=issue.protection_hint,
             )
         group.sources.append(Source(issue.found_on, issue.link_text))
     ordered = sorted(groups.values(), key=lambda g: (TYPE_ORDER.index(g.type), g.status or 0, g.url))
@@ -110,6 +116,8 @@ def report_filename(job, ext: str) -> str:
 
 
 def issue_label(type_: IssueType, status: Optional[int]) -> str:
+    if type_ == IssueType.BLOCKED_BY_SITE and status:
+        return f"Blocked by site · {status}"
     if type_ in (IssueType.HTTP_4XX, IssueType.HTTP_5XX) and status:
         try:
             return f"{status} {HTTPStatus(status).phrase}"
@@ -168,6 +176,8 @@ def build_csv(job) -> str:
             issue.response_time_ms,
             " -> ".join(hop.url for hop in issue.redirect_chain),
             "warning" if issue.is_warning else "error",
+            issue.protection_hint,
+            "; ".join(f"{k}: {v}" for k, v in issue.response_headers.items()),
         )])
     return "﻿" + out.getvalue()
 
@@ -292,6 +302,11 @@ def _group_html(group: IssueGroup) -> str:
     ]
     if group.error and group.type not in (IssueType.HTTP_4XX, IssueType.HTTP_5XX):
         parts.append(f'<p class="detail muted">{_e(group.error)}</p>')
+    if group.protection_hint in PROTECTION_LABELS:
+        parts.append(f'<p class="detail muted">Protected by {_e(PROTECTION_LABELS[group.protection_hint])}</p>')
+    if group.response_headers:
+        headers = " · ".join(f"{k}: {v}" for k, v in group.response_headers.items())
+        parts.append(f'<p class="detail muted">Response headers: {_e(headers)}</p>')
     if group.chain:
         parts.append(f'<p class="label">Redirect chain · {_plural(len(group.chain) - 1, "hop")}</p><ol class="chain">')
         for i, hop in enumerate(group.chain, 1):
@@ -350,7 +365,7 @@ def build_html(job, generated_at: Optional[datetime] = None) -> str:
         ("Links checked", f"{job.stats['links_checked']:,}", "", ""),
         ("Broken links", f"{len(grouped.errors):,}", f"in {_plural(occurrences, 'place')}" if grouped.errors else "",
          "num-error" if grouped.errors else ""),
-        ("Warnings", f"{len(grouped.warnings):,}", "redirect chains &amp; more" if grouped.warnings else "", ""),
+        ("Warnings", f"{len(grouped.warnings):,}", "worth a look" if grouped.warnings else "", ""),
         ("Duration", _format_duration(duration), "", ""),
     ]
     out.append('<dl class="cards">')
@@ -360,7 +375,7 @@ def build_html(job, generated_at: Optional[datetime] = None) -> str:
     out.append("</dl>")
 
     if not grouped.errors:
-        sub = ("Every link we checked works. A few redirects could be tidied up below."
+        sub = ("Every link we could check works. A few things are worth a look below."
                if grouped.warnings else "Every link we checked works.")
         out.append(f'<div class="all-clear"><p class="big">No broken links found</p><p>{sub}</p></div>')
     else:
@@ -370,7 +385,7 @@ def build_html(job, generated_at: Optional[datetime] = None) -> str:
 
     if grouped.warnings:
         out.append(f'<section class="warnings"><h2>Warnings <small>{_plural(len(grouped.warnings), "URL")}</small></h2>')
-        out.append('<p class="muted">These still work, but are worth tidying up.</p><ul class="list">')
+        out.append('<p class="muted">Not broken links, but worth a look: redirects to tidy up, and sites that block automated checks.</p><ul class="list">')
         out.extend(_group_html(g) for g in grouped.warnings)
         out.append("</ul></section>")
 

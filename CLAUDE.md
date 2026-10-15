@@ -76,3 +76,15 @@ page-loading errors, shows live progress, and offers a downloadable report.
 - Memory: at most MAX_FINISHED_JOBS (30) finished jobs are kept, plus 24h expiry.
 - Post-deploy: python scripts/smoke_test.py <url> [--scan-url <site you may crawl>].
 
+## Sites that block the scanner
+- Honest reporting only: no browser UA spoofing, CAPTCHA solving, identity rotation or other
+  evasion. UA is `Mozilla/5.0 (compatible; SiteLinkChecker/1.0; +CONTACT_URL)` (models.default_user_agent);
+  robots.txt is matched on the token `SiteLinkChecker` (models.ROBOTS_TOKEN), not the full UA.
+- Off-site URLs answering 401/403/429/999 or with `cf-mitigated` -> IssueType.BLOCKED_BY_SITE
+  (warning). Real 404/410/5xx stay errors. Same-site 403s after the start page stay errors.
+- Start page refused -> CrawlResult.start_blocked; the job ends `failed` with guidance
+  (jobs.start_blocked_message) and `summary.start_blocked`/`protection_hint` in the API.
+- 4xx/5xx keep only allowlisted diagnostic headers (crawler.DIAGNOSTIC_HEADERS, x-akamai-*,
+  max 12, values cut to 200 chars) plus a protection_hint. Never read error bodies. Escape them
+  like all crawled data.
+

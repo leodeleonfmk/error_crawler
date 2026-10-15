@@ -454,7 +454,7 @@
             <h3 id="warnings-heading" class="font-display text-2xl">Warnings</h3>
             <span class="text-sm muted" id="warnings-count"></span>
           </div>
-          <p class="text-sm muted mb-3">These still work, but are worth tidying up.</p>
+          <p class="text-sm muted mb-3">Not broken links, but worth a look: redirects to tidy up, and sites that block automated checks.</p>
           <div class="warning-card overflow-hidden text-sm"><ul class="issue-list" id="warning-list"></ul></div>
         </section>
 
@@ -512,6 +512,7 @@
     too_many_redirects: { label: "Too many redirects", tone: "error" },
     redirect_chain:     { label: "Redirect chain",     tone: "warning" },
     blocked:            { label: "Blocked",            tone: "warning" },
+    blocked_by_site:    { label: "Blocked by site",    tone: "warning" },
   };
   const TYPE_ORDER = Object.keys(TYPE_INFO);
 
@@ -526,10 +527,12 @@
     { key: "conn",      label: "Connection",         test: (g) => g.type === "connection_error", hideIfEmpty: true },
     { key: "toomany",   label: "Too many redirects", test: (g) => g.type === "too_many_redirects" },
     { key: "chain",     label: "Redirect chain",     test: (g) => g.type === "redirect_chain" },
+    { key: "sitebot",   label: "Blocked by site",    test: (g) => g.type === "blocked_by_site" },
     { key: "blocked",   label: "Blocked",            test: (g) => g.type === "blocked", hideIfEmpty: true },
   ];
 
   const KIND_LABEL = { page: "Page", external: "External", image: "Image" };
+  const PROTECTION_LABEL = { cloudflare: "Cloudflare", akamai: "Akamai", sucuri: "Sucuri", datadome: "DataDome" };
 
   // ---------------------------------------------------------------------------
   // State
@@ -628,7 +631,8 @@
     const status = issue.status ?? issue.status_code;
     const info = TYPE_INFO[type] || { label: type, tone: "error" };
     const isHttp = type === "http_4xx" || type === "http_5xx";
-    const text = isHttp && status ? `${status} ${status === 404 ? "Not found" : info.label}` : info.label;
+    let text = isHttp && status ? `${status} ${status === 404 ? "Not found" : info.label}` : info.label;
+    if (type === "blocked_by_site" && status) text = `${info.label} · ${status}`;
     return h("span", { class: `badge badge-${info.tone}`, text });
   }
 
@@ -1006,6 +1010,8 @@
           kind: issue.kind,
           responseMs: issue.response_time_ms,
           chain: issue.redirect_chain || [],
+          headers: issue.response_headers || {},
+          hint: issue.protection_hint || null,
           occurrences: [],
         };
         groups.set(issue.url, g);
@@ -1048,7 +1054,7 @@
 
     $("#all-clear").hidden = errors.length > 0;
     $("#all-clear-sub").textContent = warnings.length
-      ? `Every link we checked works. A few redirects could be tidied up below.`
+      ? "Every link we could check works. A few things are worth a look below."
       : cancelled ? "None so far in the pages we reached." : "Every link we checked works. Go fly a kite.";
     $("#issues-area").hidden = groups.length === 0;
 
@@ -1065,7 +1071,7 @@
       ["Pages crawled", job.stats.pages_crawled.toLocaleString(), null],
       ["Links checked", job.stats.links_checked.toLocaleString(), null],
       ["Broken links", errors.length.toLocaleString(), errors.length ? `in ${plural(occurrences(errors), "place")}` : null],
-      ["Warnings", warnings.length.toLocaleString(), warnings.length ? "redirect chains & more" : null],
+      ["Warnings", warnings.length.toLocaleString(), warnings.length ? "worth a look" : null],
       ["Duration", formatDuration(job.summary?.duration_s), null],
     ];
     $("#summary-cards").replaceChildren(...cards.map(([label, value, sub], i) =>
@@ -1121,6 +1127,10 @@
     const details = h("div", { id: detailsId, class: "px-5 sm:px-7 pb-5 pt-1 text-sm", hidden: !expanded },
       h("p", { class: "mb-3" }, h("span", { class: "muted", text: "URL: " }), safeLink(g.url)),
       g.error && !/^http_/.test(g.type) ? h("p", { class: "muted mb-3 break-url", text: g.error }) : null,
+      PROTECTION_LABEL[g.hint] ? h("p", { class: "muted mb-3", text: `Protected by ${PROTECTION_LABEL[g.hint]}` }) : null,
+      Object.keys(g.headers).length ? h("p", { class: "muted mb-3 text-xs break-url" },
+        h("span", { class: "eyebrow mr-2", text: "Response headers" }),
+        Object.entries(g.headers).map(([k, v]) => `${k}: ${v}`).join(" · ")) : null,
       g.chain.length ? renderChain(g.chain) : null,
       h("p", { class: "eyebrow mt-4 mb-2", text: "Found on" }),
       h("ul", { class: "grid gap-2" }, g.occurrences.map(renderOccurrence)),
@@ -1277,7 +1287,11 @@
         }
         break;
       case "failed":
-        renderFailed({
+        renderFailed(job.summary?.start_blocked ? {
+          eyebrow: "Blocked by the site",
+          title: "This site is blocking our scanner",
+          text: job.error_message,
+        } : {
           eyebrow: "Scan failed",
           title: "This scan couldn’t finish",
           text: job.error_message || "Something went wrong while scanning. Please try again.",

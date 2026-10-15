@@ -18,7 +18,7 @@ from typing import Awaitable, Callable, Optional
 from urllib.parse import urlsplit
 
 from app.crawler import UrlValidator, crawl, site_host
-from app.models import CrawlOptions, CrawlResult, CrawlStats, Issue
+from app.models import ROBOTS_TOKEN, CrawlOptions, CrawlResult, CrawlStats, Issue
 from app.security import validate_url
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,19 @@ JOB_RETENTION = timedelta(hours=24)
 # Finished jobs hold their issues in memory; a large scan is ~6 MB. Bound the total so a
 # busy day can't exhaust the 512 MB instance. Oldest finished jobs are dropped first.
 MAX_FINISHED_JOBS = 30
+
+
+PROTECTION_NAMES = {"cloudflare": "Cloudflare", "akamai": "Akamai", "sucuri": "Sucuri", "datadome": "DataDome"}
+
+
+def start_blocked_message(hint: Optional[str]) -> str:
+    who = f" ({PROTECTION_NAMES[hint]})" if hint in PROTECTION_NAMES else ""
+    return (
+        f"This site's firewall{who} is blocking automated checks, so we couldn't scan it. "
+        f"If it's your site, ask whoever manages it to allowlist the User-Agent token "
+        f"“{ROBOTS_TOKEN}”. Allowlisting our IP address isn't reliable: the free hosting "
+        "tier we run on doesn't have a fixed IP."
+    )
 
 
 class JobStatus(str, Enum):
@@ -263,7 +276,10 @@ class JobManager:
                 errors_found=result.errors_found,
                 warnings_found=result.warnings_found,
             )
-            if result.cancelled:
+            if result.start_blocked:
+                job.status = JobStatus.FAILED
+                job.error_message = start_blocked_message(result.start_protection_hint)
+            elif result.cancelled:
                 job.status = JobStatus.CANCELLED
                 if timed_out:
                     minutes = round(self.job_timeout_s / 60)

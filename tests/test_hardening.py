@@ -204,9 +204,10 @@ def test_overall_deadline_stops_slow_drip():
 
 
 def test_user_agent_contact_url(monkeypatch):
-    assert default_user_agent() == "SiteLinkChecker/1.0"
+    monkeypatch.delenv("CONTACT_URL", raising=False)
+    assert default_user_agent() == "Mozilla/5.0 (compatible; SiteLinkChecker/1.0)"
     monkeypatch.setenv("CONTACT_URL", "https://example.org/bot")
-    assert default_user_agent() == "SiteLinkChecker/1.0 (+https://example.org/bot)"
+    assert default_user_agent() == "Mozilla/5.0 (compatible; SiteLinkChecker/1.0; +https://example.org/bot)"
     seen = []
 
     async def record(request):
@@ -214,7 +215,7 @@ def test_user_agent_contact_url(monkeypatch):
         return httpx.Response(200, headers={"content-type": "text/html"}, text="")
 
     crawl({START: record})
-    assert seen and all(ua == "SiteLinkChecker/1.0 (+https://example.org/bot)" for ua in seen)
+    assert seen and all(ua == "Mozilla/5.0 (compatible; SiteLinkChecker/1.0; +https://example.org/bot)" for ua in seen)
 
 
 def test_redirects_capped_at_five():

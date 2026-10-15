@@ -10,6 +10,7 @@ from typing import Optional
 
 MAX_PAGES_HARD_CAP = 500
 USER_AGENT = "SiteLinkChecker/1.0"
+ROBOTS_TOKEN = "SiteLinkChecker"  # what robots.txt rules and site allowlists should match
 
 
 def _env_int(name: str, default: int) -> int:
@@ -20,8 +21,10 @@ def _env_int(name: str, default: int) -> int:
 
 
 def default_user_agent() -> str:
+    """Crawler convention (as Googlebot does): Mozilla-compatible prefix, our token, contact URL.
+    Deliberately not a browser UA: we identify ourselves honestly."""
     contact = os.environ.get("CONTACT_URL", "").strip()
-    return f"{USER_AGENT} (+{contact})" if contact else USER_AGENT
+    return f"Mozilla/5.0 (compatible; {USER_AGENT}; +{contact})" if contact else f"Mozilla/5.0 (compatible; {USER_AGENT})"
 
 
 class LinkKind(str, Enum):
@@ -40,10 +43,11 @@ class IssueType(str, Enum):
     CONNECTION_ERROR = "connection_error"
     REDIRECT_CHAIN = "redirect_chain"  # 2+ hops; works, but worth fixing
     BLOCKED = "blocked"  # rejected by url_validator, never requested
+    BLOCKED_BY_SITE = "blocked_by_site"  # external site refused automated checks (WAF/bot protection)
 
     @property
     def is_warning(self) -> bool:
-        return self in (IssueType.REDIRECT_CHAIN, IssueType.BLOCKED)
+        return self in (IssueType.REDIRECT_CHAIN, IssueType.BLOCKED, IssueType.BLOCKED_BY_SITE)
 
 
 @dataclass
@@ -64,6 +68,9 @@ class Issue:
     response_time_ms: Optional[float] = None
     # Every hop including the final response, e.g. [a 301, b 302, c 200].
     redirect_chain: list[RedirectHop] = field(default_factory=list)
+    # Allowlisted headers from 4xx/5xx (and challenge) responses, for diagnosing blocks.
+    response_headers: dict[str, str] = field(default_factory=dict)
+    protection_hint: Optional[str] = None  # cloudflare, akamai, sucuri, datadome, unknown
 
     @property
     def is_warning(self) -> bool:
@@ -125,6 +132,8 @@ class CrawlResult:
     url_cap_reached: bool = False
     link_cap_pages: int = 0  # pages with more links than we parse
     external_cap_reached: bool = False
+    start_blocked: bool = False  # the start page itself was refused (401/403/429/challenge)
+    start_protection_hint: Optional[str] = None
     issues: list[Issue] = field(default_factory=list)
 
     @property

@@ -453,3 +453,64 @@ def test_rate_limit_message_on_start(servers, watched):
         "You've started a lot of scans lately. Try again in about 60 minutes.")
     screen(page, "start")
 
+
+
+def _job_payload(status, issues, summary_extra=None, error_message=None):
+    return {
+        "id": "blockedjob01", "url": "https://example.com/", "status": status, "queue_position": None,
+        "options": {"max_pages": 100, "check_external": True, "check_images": False},
+        "stats": {"pages_crawled": 1, "links_checked": 2, "errors_found": 0, "warnings_found": len(issues), "current_url": ""},
+        "created_at": "2026-10-15T19:00:00+00:00", "started_at": "2026-10-15T19:00:01+00:00",
+        "finished_at": "2026-10-15T19:00:05+00:00", "error_message": error_message,
+        "summary": {"duration_s": 4.0, "robots_skipped": 0, "page_limit_reached": False, "pages_truncated": 0,
+                    "url_cap_reached": False, "link_cap_pages": 0, "external_cap_reached": False,
+                    "start_blocked": False, "protection_hint": None, "counts_by_type": {}, **(summary_extra or {})},
+        "issues": issues, "next_since": len(issues),
+    }
+
+
+def test_blocked_by_site_warnings_render_safely(servers, watched, screenshot):
+    import json as _json
+    issue = {
+        "url": "https://linkedin.example/in/someone", "issue_type": "blocked_by_site", "kind": "external",
+        "found_on": "https://example.com/", "link_text": "Our LinkedIn", "status_code": 999,
+        "error": "This site blocks automated checks, so we can't tell if the link works.",
+        "response_time_ms": 120.0, "redirect_chain": [], "protection_hint": "cloudflare",
+        "response_headers": {"server": "cloudflare", "cf-ray": "abc-SJC",
+                             "via": '"><img src=x onerror="window.__xss=9"><script>window.__xss=10</script>'},
+    }
+    w = watched()
+    w.page.route("**/api/jobs/blockedjob01?since=*",
+                 lambda r: r.fulfill(status=200, content_type="application/json", body=_json.dumps(_job_payload("done", [issue]))))
+    w.page.goto(f"{servers.app}/#/job/blockedjob01")
+    screen(w.page, "results")
+    chip = w.page.locator("#filter-chips button", has_text="Blocked by site")
+    expect(chip).to_contain_text("1")
+    chip.click()
+    assert w.page.locator("#warning-list .issue-toggle").count() == 1
+    expect(w.page.locator("#warning-list .badge")).to_have_text("Blocked by site · 999")
+    w.page.click("#warning-list .issue-toggle")
+    details = w.page.inner_text("#warning-list")
+    assert "can't tell if the link works" in details and "Protected by Cloudflare" in details
+    assert "<script>window.__xss=10</script>" in details  # shown as text
+    assert w.page.locator("#errors-section").is_hidden()
+    assert not w.page.is_visible("#all-clear") or "No broken links found" in w.page.inner_text("#all-clear")
+    assert_no_live_payloads(w.page)
+    w.assert_clean()
+    screenshot(w.page, "blocked-by-site-warning")
+
+
+def test_blocked_start_page_shows_guidance(servers, watched, screenshot):
+    import json as _json
+    message = ("This site's firewall (Cloudflare) is blocking automated checks, so we couldn't scan it. "
+               "If it's your site, ask whoever manages it to allowlist the User-Agent token “SiteLinkChecker”.")
+    payload = _job_payload("failed", [], {"start_blocked": True, "protection_hint": "cloudflare"}, message)
+    w = watched()
+    w.page.route("**/api/jobs/blockedjob01?since=*",
+                 lambda r: r.fulfill(status=200, content_type="application/json", body=_json.dumps(payload)))
+    w.page.goto(f"{servers.app}/#/job/blockedjob01")
+    screen(w.page, "failed")
+    expect(w.page.locator("#failed-title")).to_have_text("This site is blocking our scanner")
+    expect(w.page.locator("#failed-text")).to_contain_text("“SiteLinkChecker”")
+    w.assert_clean()
+    screenshot(w.page, "blocked-start-page", full_page=False)

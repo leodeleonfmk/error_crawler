@@ -136,6 +136,8 @@ def job_payload(manager: JobManager, job: Job, since: int = 0) -> dict:
             "url_cap_reached": r.url_cap_reached,
             "link_cap_pages": r.link_cap_pages,
             "external_cap_reached": r.external_cap_reached,
+            "start_blocked": r.start_blocked,
+            "protection_hint": r.start_protection_hint,
             "counts_by_type": r.counts_by_type,
         }
     return payload

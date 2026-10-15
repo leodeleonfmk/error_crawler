@@ -39,7 +39,7 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers
 | `ALLOW_PRIVATE_HOSTS` | unset | `1` disables private-address, hostname and port blocking. **Local development only; never set in deploy config.** Logs a loud warning at startup. |
 | `ALLOWED_PORTS` | `80,443,8080,8443` | Ports the crawler may connect to. |
 | `TRUSTED_PROXY_HOPS` | `0` | `0`: rate-limit by socket peer. `N`: use the Nth `X-Forwarded-For` entry from the right (Render: `1`). The first 3 requests log the resolved IP so you can verify. |
-| `CONTACT_URL` | unset | Appended to the User-Agent as `SiteLinkChecker/1.0 (+URL)` so site owners can reach you. |
+| `CONTACT_URL` | unset | Added to the User-Agent, `Mozilla/5.0 (compatible; SiteLinkChecker/1.0; +URL)`, so site owners can reach you. |
 | `RATE_LIMIT_JOBS_PER_HOUR` | `20` | New scans per IP per hour. |
 | `RATE_LIMIT_ACTIVE_JOBS_PER_IP` | `2` | Running + queued scans per IP. |
 | `RATE_LIMIT_ACTIVE_JOBS_PER_DOMAIN` | `1` | Running + queued scans per target site (www counts as the same site), across all users. |
@@ -99,6 +99,34 @@ pytest -m e2e                                  # uses installed Google Chrome
 PLAYWRIGHT_CHANNEL= pytest -m e2e              # or Playwright's Chromium (run `playwright install chromium` first)
 E2E_SCREENSHOTS=/tmp/shots pytest -m e2e       # also save screenshots
 ```
+
+## Sites that block the scanner
+
+Many sites put a firewall or bot protection (Cloudflare, Akamai, Sucuri, DataDome and others)
+in front of their pages. These often challenge or refuse requests from datacenter IPs like
+Render's, even though the same scan works from a laptop. The app reports this honestly
+instead of trying to get around it:
+
+- **External links** that answer 401, 403, 429 or 999 (LinkedIn's "go away" code), or carry a
+  Cloudflare `cf-mitigated` header, are listed as **Blocked by site** warnings: "This site
+  blocks automated checks, so we can't tell if the link works." They have their own filter
+  chip and appear as warnings in the CSV and HTML reports. Real 404, 410 and 5xx responses are
+  still errors.
+- **If the start page itself is refused**, the scan ends as failed with an explanation, the
+  detected protection (when we can tell), and what the site owner can do: allowlist the
+  User-Agent token `SiteLinkChecker`. Allowlisting by IP isn't reliable because Render's free
+  tier doesn't have a fixed outbound IP.
+- Pages on the scanned site that return 403 **after** the start page loaded (e.g. a members
+  area) stay normal errors.
+- For every 4xx/5xx response we keep a small allowlist of response headers (`server`,
+  `cf-ray`, `cf-mitigated`, `x-sucuri-id`, `x-datadome`, `x-akamai-*`, `via`, `retry-after`;
+  never bodies or cookies) and derive a `protection_hint` (`cloudflare`, `akamai`, `sucuri`,
+  `datadome` or `unknown`). Both appear in the issue details and the CSV.
+
+The crawler identifies itself as `Mozilla/5.0 (compatible; SiteLinkChecker/1.0; +CONTACT_URL)`,
+the same convention Googlebot uses, and sends ordinary `Accept`, `Accept-Language` and
+`Accept-Encoding` headers. It never pretends to be a browser, solves CAPTCHAs, or retries with
+a different identity. robots.txt rules for `User-agent: SiteLinkChecker` are honored.
 
 ## Deploying to Render
 
@@ -161,7 +189,7 @@ allowed to crawl. Each check prints PASS or FAIL; the exit code is non-zero on a
      find the device's real IP in the raw `x-forwarded-for` list, count its position from
      the right (rightmost = 1), set `TRUSTED_PROXY_HOPS` to that number in the dashboard,
      redeploy and check again.
-- [ ] `CONTACT_URL` is set (the crawler's User-Agent should end in `(+https://...)`).
+- [ ] `CONTACT_URL` is set (the crawler's User-Agent should end in `; +https://...)`).
 - [ ] Optional: set up UptimeRobot (below).
 
 ### Keeping it awake with UptimeRobot (optional)
