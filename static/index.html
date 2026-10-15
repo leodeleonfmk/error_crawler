@@ -6,7 +6,7 @@
   <title>Link Checker · Fly More Kites</title>
   <meta name="description" content="Crawl a website and find broken links and page-loading errors.">
   <meta name="color-scheme" content="light dark">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 26 13H6Z' fill='%23E8506A'/%3E%3Cpath d='M6 13h20L16 24Z' fill='%23F4F27A'/%3E%3Cpath d='M16 2 26 13 16 24 6 13Z' fill='none' stroke='%231C1B3A' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M16 24c-2 2 2 3 0 6' fill='none' stroke='%23611B35' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" href="/static/img/FMK%20Logomark%20Alt-2026-Pink.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Fraunces:opsz,wght@9..144,300;9..144,400&display=swap" rel="stylesheet">
@@ -70,7 +70,6 @@
       --panel-track: rgba(255, 255, 255, 0.16);
       --panel-alert: var(--coral-soft);
       --focus: var(--green-deep);
-      --kite-line: var(--navy);
       --shadow: 0 1px 2px rgba(28, 27, 58, 0.04), 0 8px 24px rgba(28, 27, 58, 0.06);
     }
 
@@ -97,7 +96,6 @@
         --success-bg: #173B27;
         --success-ink: #8BE3A6;
         --focus: var(--butter);
-        --kite-line: var(--cream);
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.25);
       }
     }
@@ -255,7 +253,7 @@
     @keyframes screen-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
     .feed-in { animation: feed-in .3s ease both; }
     @keyframes feed-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-    .kite-float { animation: kite-float 4s ease-in-out infinite; transform-origin: 50% 20%; }
+    .kite-float { animation: kite-float 4s ease-in-out infinite; transform-origin: 50% 50%; }
     @keyframes kite-float {
       0%, 100% { transform: translateY(0) rotate(-4deg); }
       50% { transform: translateY(-10px) rotate(4deg); }
@@ -269,18 +267,11 @@
 </head>
 <body class="min-h-screen flex flex-col">
   <header class="site-header">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-      <a href="#" id="home-link" class="flex items-center gap-3" aria-label="Link Checker home">
-        <!-- Replace this inline SVG with the FMK logo file when available, e.g.
-             <img src="/static/fmk-logo.svg" alt="Fly More Kites" class="h-7 w-auto"> -->
-        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
-          <path d="M16 2 26 13 16 24 6 13Z" stroke-width="2"/>
-          <path d="M16 2v22M6 13h20" stroke-width="1.4"/>
-          <path d="M16 24c-2 2 2 3 0 6" stroke-width="1.6"/>
-        </svg>
-        <span class="text-xs font-bold tracking-[0.2em] uppercase">Link Checker</span>
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+      <a href="/" id="home-link" class="flex items-center gap-3 sm:gap-4 min-w-0">
+        <img src="/static/img/FMK%20Logo%20Horizontal-2026-Yellow.png" alt="Fly More Kites" width="129" height="44" class="h-9 sm:h-11 w-auto flex-none" decoding="async">
+        <span class="text-xs font-bold tracking-[0.2em] uppercase border-l border-white/30 pl-3 sm:pl-4 py-1 whitespace-nowrap">Link Checker</span>
       </a>
-      <span class="hidden sm:block text-xs tracking-[0.15em] uppercase opacity-80">Fly More Kites</span>
     </div>
   </header>
 
@@ -293,6 +284,11 @@
         Let’s find what’s broken.<br class="hidden sm:block"> <span class="accent">Before your visitors do.</span>
       </h1>
       <p class="muted text-lg mt-6 max-w-2xl">Paste a URL and we’ll crawl the site, check every link, and tell you what needs fixing.</p>
+
+      <div id="resume-banner" class="notice mt-8 max-w-3xl flex flex-wrap items-center justify-between gap-x-4 gap-y-1 hairline" style="background: var(--surface)" hidden>
+        <span id="resume-text" class="min-w-0 break-url"></span>
+        <a id="resume-link" class="link-tertiary" href="#">View progress</a>
+      </div>
 
       <form id="start-form" class="mt-10 max-w-3xl" novalidate>
         <label for="url-input" class="eyebrow block mb-3">Website address</label>
@@ -341,14 +337,7 @@
     <!-- 2. WAITING (waking server / queued) ------------------------------ -->
     <section data-screen="waiting" aria-labelledby="waiting-title" hidden>
       <div class="card max-w-2xl mx-auto px-6 sm:px-12 py-12 sm:py-16 text-center">
-        <svg class="kite-float mx-auto mb-8" width="88" height="120" viewBox="0 0 88 120" aria-hidden="true">
-          <path d="M44 4 80 44H8Z" fill="var(--coral)"/>
-          <path d="M8 44h72L44 84Z" fill="var(--butter)"/>
-          <path d="M44 4v80" stroke="var(--kite-line)" stroke-width="2"/>
-          <path d="M44 4 80 44 44 84 8 44Z" fill="none" stroke="var(--kite-line)" stroke-width="2.5" stroke-linejoin="round"/>
-          <path d="M44 84c-8 8 8 12 0 20s4 10 0 14" fill="none" stroke="var(--lilac)" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="M38 98l6 3M40 110l6 2" stroke="var(--coral)" stroke-width="3" stroke-linecap="round"/>
-        </svg>
+        <img src="/static/img/FMK%20Logomark%20Alt-2026-Pink.png" alt="" aria-hidden="true" width="96" height="96" class="kite-float mx-auto mb-8 w-20 h-20 sm:w-24 sm:h-24" decoding="async">
         <p class="eyebrow mb-3" id="waiting-eyebrow">Hang tight</p>
         <h2 id="waiting-title" tabindex="-1" class="font-display text-4xl sm:text-5xl outline-none">Loading your scan…</h2>
         <p id="waiting-text" class="muted mt-4 text-lg"></p>
@@ -509,6 +498,7 @@
   const FEED_LIMIT = 50;
   const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
   const PREFS_KEY = "fmk-link-checker:prefs";
+  const ACTIVE_JOB_KEY = "fmk-link-checker:active-job";
   const TRANSIENT_STATUSES = new Set([502, 503, 504]);
   const FINISHED = new Set(["done", "cancelled", "failed"]);
 
@@ -804,8 +794,31 @@
     state.jobId = null;
     state.job = null;
     setSubmitting(false);
+    renderResumeBanner();
     showScreen("start");
     if (focus) $("#url-input").focus();
+  }
+
+  // Leaving a scan (logo, back button) never stops it; offer a way back.
+  function rememberActiveJob(job) {
+    try { sessionStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ id: job.id, url: job.url })); } catch { /* ignore */ }
+  }
+
+  function forgetActiveJob(id) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(ACTIVE_JOB_KEY) || "null");
+      if (!id || saved?.id === id) sessionStorage.removeItem(ACTIVE_JOB_KEY);
+    } catch { /* ignore */ }
+  }
+
+  function renderResumeBanner() {
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(ACTIVE_JOB_KEY) || "null"); } catch { saved = null; }
+    const valid = saved && typeof saved.id === "string" && JOB_ID_RE.test(saved.id);
+    $("#resume-banner").hidden = !valid;
+    if (!valid) return;
+    $("#resume-text").textContent = `Your scan of ${hostOf(String(saved.url || ""))} is still going.`;
+    $("#resume-link").href = `#/job/${encodeURIComponent(saved.id)}`;
   }
 
   function setSubmitting(busy) {
@@ -1165,6 +1178,7 @@
   }
 
   function renderNotFound() {
+    forgetActiveJob(state.jobId);
     renderFailed({
       eyebrow: "Report not found",
       title: "We couldn’t find that scan",
@@ -1271,8 +1285,13 @@
         break;
     }
 
-    if (FINISHED.has(job.status)) stopPolling();
-    else scheduleNext(gen);
+    if (FINISHED.has(job.status)) {
+      stopPolling();
+      forgetActiveJob(job.id);
+    } else {
+      rememberActiveJob(job);
+      scheduleNext(gen);
+    }
   }
 
   function scheduleNext(gen, delayMs) {
@@ -1378,7 +1397,11 @@
     $("#url-input").addEventListener("input", () => { showFieldError(""); showFormError(""); });
     for (const input of $$("#options input")) input.addEventListener("change", () => { renderOptionsSummary(); savePrefs(selectedOptions()); });
     $("#search").addEventListener("input", (e) => { state.search = e.target.value; renderIssueLists(); });
-    $("#home-link").addEventListener("click", (e) => { e.preventDefault(); goToStart(); });
+    $("#home-link").addEventListener("click", (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;  // new tab etc.
+      e.preventDefault();
+      goToStart();
+    });
     document.addEventListener("click", (e) => {
       const action = e.target.closest("[data-action]")?.dataset.action;
       if (action === "cancel") onCancel();

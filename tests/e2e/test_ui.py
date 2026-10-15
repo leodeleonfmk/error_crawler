@@ -107,12 +107,61 @@ def start_scan(page, base, url, max_pages="100", images=False, external=True):
 
 
 def assert_no_live_payloads(page):
-    assert page.evaluate("document.querySelectorAll('main img, main script:not([src])').length") == 0
+    # Our own logo is the only legitimate image; anything else would be injected.
+    assert page.evaluate("document.querySelectorAll('main img:not([src^=\"/static/img/\"]), main script:not([src])').length") == 0
+    assert page.evaluate("Array.from(document.querySelectorAll('main img')).every(i => !i.hasAttribute('onerror'))")
     hrefs = page.evaluate("Array.from(document.querySelectorAll('main a')).map(a => a.getAttribute('href'))")
-    assert all(h.startswith(("http://", "https://", "/api/")) for h in hrefs), hrefs
+    # crawled links must be http(s); the rest are the app's own (downloads, in-page #/job links)
+    assert all(h.startswith(("http://", "https://", "/api/", "#")) for h in hrefs), hrefs
+    assert not any(h.lower().startswith(("javascript:", "data:")) for h in hrefs)
 
 
 # --- tests ---------------------------------------------------------------------
+
+
+def test_logos_load_without_errors(servers, watched, screenshot):
+    for scheme in ("light", "dark"):
+        for label, vp in (("desktop", DESKTOP), ("mobile", MOBILE)):
+            w = watched(scheme=scheme, viewport=vp, device_scale_factor=2)
+            failed = []
+            w.page.on("response", lambda r: r.status >= 400 and failed.append(f"{r.status} {r.url}"))
+            w.page.goto(servers.app)
+            w.page.wait_for_load_state("networkidle")
+            header_logo = w.page.locator("#home-link img")
+            assert header_logo.get_attribute("alt") == "Fly More Kites"
+            assert w.page.evaluate("document.querySelector('#home-link img').naturalWidth") > 1000  # high-DPI source
+            box = header_logo.bounding_box()
+            assert 32 <= box["height"] <= 44, box
+            screenshot(w.page, f"logo-header-{scheme}-{label}", full_page=False)
+
+            w.page.evaluate("renderWaking('https://example.com')")
+            pink = w.page.locator('[data-screen="waiting"] img')
+            assert pink.get_attribute("alt") == "" and pink.get_attribute("aria-hidden") == "true"
+            w.page.wait_for_function("document.querySelector('[data-screen=waiting] img').complete")
+            assert w.page.evaluate("document.querySelector('[data-screen=waiting] img').naturalWidth") > 0
+            w.page.wait_for_timeout(400)  # let the screen transition finish
+            screenshot(w.page, f"logo-waiting-{scheme}-{label}", full_page=False)
+            assert failed == [], failed
+            w.assert_clean()
+
+
+def test_logo_link_keeps_running_scan_resumable(servers, watched):
+    page = watched().page
+    start_scan(page, servers.app, servers.big, max_pages="500", external=False)
+    screen(page, "running", timeout=15000)
+    job_id = page.url.split("#/job/")[1]
+    page.click("#home-link")
+    screen(page, "start")
+    assert "#/job/" not in page.url
+    expect(page.locator("#resume-banner")).to_contain_text("is still going")
+    page.click("#resume-link")
+    screen(page, "running", timeout=15000)
+    assert page.url.endswith(f"#/job/{job_id}")
+    page.click("#home-link")
+    page.go_back()
+    screen(page, "running", timeout=15000)
+    page.click("#running-cancel")
+    screen(page, "results", timeout=15000)
 
 
 def test_start_screen_and_validation(servers, watched, screenshot):
@@ -357,6 +406,9 @@ def test_reduced_motion(servers, browser):
         page.goto(f"{servers.app}/#/job/{job['id']}")
         screen(page, "results")
         page.click("[data-action=copy-share]")
+        assert page.evaluate("document.getAnimations().length") == 0
+        page.evaluate("renderWaking('https://example.com')")
+        assert page.is_visible('[data-screen="waiting"] img.kite-float')  # logo stays, just doesn't float
         assert page.evaluate("document.getAnimations().length") == 0
     finally:
         ctx.close()
