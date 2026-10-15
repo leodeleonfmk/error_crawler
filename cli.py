@@ -23,17 +23,14 @@ def _describe(issue: Issue) -> str:
 
 
 class ProgressPrinter:
-    """Rewrites one status line on a TTY and prints the newest issue above it."""
+    """Rewrites one status line on a TTY and prints each new issue above it."""
 
     def __init__(self) -> None:
         self.tty = sys.stderr.isatty()
-        self.last_issue: Optional[Issue] = None
 
     def __call__(self, stats: CrawlStats) -> None:
         width = shutil.get_terminal_size((100, 20)).columns
-        issue = stats.latest_issue
-        if issue is not None and issue is not self.last_issue:
-            self.last_issue = issue
+        for issue in stats.new_issues:
             mark = "!" if issue.is_warning else "✗"
             line = f"  {mark} {_describe(issue):<18} {issue.url}  (on {issue.found_on or 'start'})"
             self._clear()

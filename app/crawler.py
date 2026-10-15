@@ -245,6 +245,7 @@ class Crawler:
         self.page_limit_reached = False
         self._pages_queued = 0
         self._current_url = ""
+        self._issues_reported = 0  # how many issues on_progress has delivered
         # key -> issue template (None = OK) once checked; key -> occurrences while pending.
         self._outcomes: dict[str, Optional[Issue]] = {}
         self._pending: dict[str, list[_Occurrence]] = {}
@@ -393,8 +394,9 @@ class Crawler:
             warnings_found=self.warnings_found,
             queued=self._queue.qsize(),
             current_url=self._current_url,
-            latest_issue=self.issues[-1] if self.issues else None,
+            new_issues=self.issues[self._issues_reported :],
         )
+        self._issues_reported = len(self.issues)
         ret = self.on_progress(stats)
         if inspect.isawaitable(ret):
             await ret

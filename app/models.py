@@ -88,7 +88,7 @@ class CrawlStats:
     warnings_found: int
     queued: int
     current_url: str
-    latest_issue: Optional[Issue] = None
+    new_issues: list[Issue] = field(default_factory=list)  # all issues since the previous callback
 
 
 @dataclass

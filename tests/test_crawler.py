@@ -231,5 +231,19 @@ def test_progress_callback_and_cancel():
     assert result.cancelled
     assert result.pages_crawled < 10
     assert calls[0].current_url == "https://example.com/"
-    assert any(c.latest_issue and c.latest_issue.status_code == 404 for c in calls)
+    reported = [i for c in calls for i in c.new_issues]
+    assert [i.url for i in reported] == ["https://example.com/missing"]
     assert calls[-1].errors_found == 1
+
+
+def test_new_issues_delivers_every_issue_exactly_once():
+    links = [f"/missing{i}" for i in range(10)] + ["https://other.org/gone", "/ok"]
+    site = FakeSite({
+        "https://example.com/": ok(page(*links)),
+        "https://example.com/ok": ok(page("/missing0", "/missing1")),  # repeat occurrences
+    })
+    reported = []
+    result = run(site, options=CrawlOptions(delay=0, concurrency=5),
+                 on_progress=lambda s: reported.extend(s.new_issues))
+    assert len(result.issues) == 13
+    assert reported == result.issues
