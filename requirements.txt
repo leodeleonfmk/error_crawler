@@ -1,4 +1,28 @@
-httpx>=0.27,<1
-beautifulsoup4>=4.12
-fastapi>=0.115
-uvicorn>=0.30
+# Runtime dependencies, pinned exactly (pip freeze from a clean Python 3.12.15 venv).
+# Dev/test tools live in requirements-dev.txt.
+
+# Direct dependencies
+beautifulsoup4==4.15.0
+fastapi==0.143.2
+# Pinned exactly: app/security.py swaps httpx's private AsyncHTTPTransport._pool to
+# install the SSRF-guarding network backend. Re-verify that (tests/test_security.py and
+# tests/test_versions.py) before changing httpx or httpcore.
+httpx==0.28.1
+httpcore==1.0.9
+uvicorn==0.54.0
+
+# Transitive dependencies
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+click==8.5.0
+h11==0.16.0
+idna==3.20
+opentelemetry-api==1.45.1
+pydantic==2.14.1
+pydantic_core==2.50.1
+soupsieve==3.0.3
+starlette==1.8.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0

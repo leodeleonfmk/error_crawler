@@ -397,3 +397,39 @@ async def test_report_filename_sanitized(env):
     filename = re.search(r'filename="([^"]+)"', disposition).group(1)
     assert re.fullmatch(r"[a-z0-9._-]+", filename)
     assert filename.startswith("link-check_sub_domain.a.test_")  # uppercase and port dropped
+
+
+@pytest.mark.parametrize("path", [
+    "/static/img/FMK%20Logo%20Horizontal-2026-Yellow.png",
+    "/static/img/FMK%20Logomark%20Alt-2026-Pink.png",
+])
+async def test_logos_are_served(env, path):
+    client, _, _ = env
+    resp = await client.get(path)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content.startswith(b"\x89PNG")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+async def test_index_references_existing_logos(env):
+    client, _, _ = env
+    page = (await client.get("/")).text
+    srcs = set(re.findall(r'(?:src|href)="(/static/[^"]+)"', page))
+    assert len(srcs) == 2
+    for src in srcs:
+        assert (await client.get(src)).status_code == 200, src
+
+
+async def test_cleanup_caps_number_of_finished_jobs():
+    manager = JobManager(crawl_fn=FakeCrawl(), max_finished_jobs=3)
+    jobs = []
+    for i in range(6):
+        job = manager.submit(f"https://s{i}.test/", options=None)
+        jobs.append(job)
+        if i < 5:
+            manager.cancel(job)
+            job.finished_at = _now() - timedelta(minutes=10 - i)  # job 0 is the oldest
+    assert manager.cleanup() == 2
+    assert set(manager.jobs) == {jobs[2].id, jobs[3].id, jobs[4].id, jobs[5].id}  # newest 3 + the queued one
+

@@ -50,6 +50,7 @@ BLOCKED_NETWORKS = [ipaddress.ip_network(n) for n in (
     "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
     "255.255.255.255/32",
     "::/128", "::1/128", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32",
+    "2002::/16",  # 6to4: deprecated relays; newer Pythons treat it as non-global anyway
     "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8",
 )]
 NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")

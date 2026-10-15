@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException
 
@@ -36,7 +39,9 @@ from app.security import NOT_ALLOWED_MESSAGE, log_startup_warnings
 
 log = logging.getLogger(__name__)
 if not logging.getLogger().handlers:  # uvicorn only configures its own loggers
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
+    # stdout at INFO so Render's log viewer shows startup and client-IP lines.
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(levelname)s:     %(name)s - %(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 JOB_NOT_FOUND = (
@@ -195,6 +200,8 @@ def create_app(manager: Optional[JobManager] = None, limits: Optional[RateLimits
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        commit = os.environ.get("RENDER_GIT_COMMIT", "")
+        log.info("Starting Link Checker (commit %s)", commit[:12] if commit else "unknown")
         log_startup_warnings()
         log.info("TRUSTED_PROXY_HOPS=%d (client IP = %s)", hops,
                  "socket peer" if hops == 0 else f"X-Forwarded-For entry {hops} from the right")
@@ -256,6 +263,8 @@ def create_app(manager: Optional[JobManager] = None, limits: Optional[RateLimits
         if job is None:
             raise HTTPException(404, JOB_NOT_FOUND)
         return job
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     async def index():

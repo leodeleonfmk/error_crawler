@@ -4,9 +4,10 @@ A small web app: users paste a URL, it crawls the site, finds broken links and
 page-loading errors, shows live progress, and offers a downloadable report.
 
 ## Stack
-- Python 3.11+, FastAPI, httpx (async), BeautifulSoup4
+- Python 3.12 (pinned: .python-version and PYTHON_VERSION in render.yaml), FastAPI, httpx (async), BeautifulSoup4
 - Frontend: a single HTML page with Tailwind (CDN) and vanilla JS, served by FastAPI. No build step.
-- No database. Job state in memory; reports written to ./reports (ephemeral).
+- No database. Job state in memory; reports are generated on request from the in-memory
+  job (nothing is written to disk).
 
 ## Deployment constraints (Render free tier)
 - 512 MB RAM, low CPU, filesystem is wiped on restart, service sleeps when idle
@@ -61,3 +62,17 @@ page-loading errors, shows live progress, and offers a downloadable report.
   MAX_EXTERNAL_PER_JOB, PER_HOST_CONCURRENCY. See the README table.
 - Tests: set ALLOW_PRIVATE_HOSTS=1 only in specific fixtures (test_api, test_ratelimit, the e2e
   server launcher). tests/test_security.py runs with it unset. Never set it globally.
+
+## Deployment
+- Render free tier via the Blueprint in render.yaml (Python runtime, plan free, autoDeployTrigger:
+  commit, healthCheckPath /health). Start command:
+  `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers`.
+- tests/test_deploy.py guards render.yaml: never ALLOW_PRIVATE_HOSTS, exactly 1 worker,
+  --no-proxy-headers present, PYTHON_VERSION matches .python-version.
+- Every runtime dependency is pinned with == in requirements.txt. httpx/httpcore must match the
+  pin (tests/test_versions.py) because app/security.py patches httpx internals.
+- TRUSTED_PROXY_HOPS=1 on Render; verify it after every infra change (README checklist).
+- CONTACT_URL is set in the dashboard (sync: false), not in the repo.
+- Memory: at most MAX_FINISHED_JOBS (30) finished jobs are kept, plus 24h expiry.
+- Post-deploy: python scripts/smoke_test.py <url> [--scan-url <site you may crawl>].
+

@@ -1,0 +1,39 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploy with Render dashboard > New > Blueprint, pointing at this repo.
+services:
+  - type: web
+    name: fmk-link-checker
+    runtime: python
+    plan: free
+    # oregon is Render's default. Others: ohio, virginia, frankfurt, singapore.
+    # The region can't be changed after the service is created.
+    region: oregon
+    # Deploy on every push to the default branch (replaces the deprecated autoDeploy: true).
+    autoDeployTrigger: commit
+    buildCommand: pip install -r requirements.txt
+    # One worker only: jobs and rate limits live in memory. --no-proxy-headers so the app's
+    # TRUSTED_PROXY_HOPS logic is the only code that reads X-Forwarded-For.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
+    healthCheckPath: /health
+    envVars:
+      # Must be a full version for Render; keep in sync with .python-version.
+      - key: PYTHON_VERSION
+        value: 3.12.15
+      # Render's proxy appends the real client IP as the rightmost X-Forwarded-For entry.
+      # VERIFY AFTER DEPLOY (README > Post-deploy checklist): if this is wrong, every
+      # visitor shares one rate-limit bucket.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # Shown in the crawler's User-Agent so site owners can reach you. Set it in the
+      # dashboard (e.g. https://flymorekites.com/contact).
+      - key: CONTACT_URL
+        sync: false
+      # Rate limits use the defaults below. To tune, uncomment and change:
+      # - key: RATE_LIMIT_JOBS_PER_HOUR
+      #   value: "20"
+      # - key: RATE_LIMIT_ACTIVE_JOBS_PER_IP
+      #   value: "2"
+      # - key: RATE_LIMIT_ACTIVE_JOBS_PER_DOMAIN
+      #   value: "1"
+      # - key: RATE_LIMIT_API_PER_MINUTE
+      #   value: "120"

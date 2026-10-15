@@ -97,6 +97,7 @@ BLOCKED = [
     "http://[64:ff9b::7f00:1]/",  # NAT64 of 127.0.0.1
     "http://[2002:7f00:1::]/",  # 6to4 of 127.0.0.1
     "http://[2002:a9fe:a9fe::]/",  # 6to4 of 169.254.169.254
+    "http://[2002:808:808::]/",  # 6to4 of public 8.8.8.8: the whole 6to4 range is blocked
     # legacy IPv4 spellings of 127.0.0.1
     "http://2130706433/",
     "http://0x7f000001/",
@@ -152,7 +153,6 @@ ALLOWED = [
     "http://example.com:80/",
     "http://example.com:8080/",
     "https://example.com:8443/",
-    "http://[2002:808:808::]/",  # 6to4 of public 8.8.8.8
     "http://does-not-resolve.test/",  # unresolvable is NOT blocked: it becomes a DNS error
 ]
 

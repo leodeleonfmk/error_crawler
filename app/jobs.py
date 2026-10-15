@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 from collections import deque
 from dataclasses import dataclass, field
@@ -31,6 +32,9 @@ JOB_TIMEOUT_S = 10 * 60
 CANCEL_GRACE_S = 30
 CLEANUP_INTERVAL_S = 5 * 60
 JOB_RETENTION = timedelta(hours=24)
+# Finished jobs hold their issues in memory; a large scan is ~6 MB. Bound the total so a
+# busy day can't exhaust the 512 MB instance. Oldest finished jobs are dropped first.
+MAX_FINISHED_JOBS = 30
 
 
 class JobStatus(str, Enum):
@@ -88,6 +92,7 @@ class JobManager:
         job_timeout_s: float = JOB_TIMEOUT_S,
         cleanup_interval_s: float = CLEANUP_INTERVAL_S,
         retention: timedelta = JOB_RETENTION,
+        max_finished_jobs: Optional[int] = None,
     ) -> None:
         self.crawl_fn = crawl_fn
         self.url_validator = url_validator
@@ -95,6 +100,7 @@ class JobManager:
         self.job_timeout_s = job_timeout_s
         self.cleanup_interval_s = cleanup_interval_s
         self.retention = retention
+        self.max_finished_jobs = max_finished_jobs or int(os.environ.get("MAX_FINISHED_JOBS", MAX_FINISHED_JOBS))
         self.jobs: dict[str, Job] = {}
         self._queue: deque[str] = deque()
         self._has_work: Optional[asyncio.Event] = None  # created in start(), inside the loop
@@ -169,7 +175,12 @@ class JobManager:
 
     def cleanup(self) -> int:
         cutoff = _now() - self.retention
-        expired = [j.id for j in self.jobs.values() if j.finished_at and j.finished_at < cutoff]
+        finished = sorted((j for j in self.jobs.values() if j.status.finished and j.finished_at),
+                          key=lambda j: j.finished_at)
+        expired = [j.id for j in finished if j.finished_at < cutoff]
+        overflow = len(finished) - len(expired) - self.max_finished_jobs
+        if overflow > 0:
+            expired += [j.id for j in finished if j.finished_at >= cutoff][:overflow]
         for job_id in expired:
             del self.jobs[job_id]
         return len(expired)
@@ -264,6 +275,7 @@ class JobManager:
             job.stats["current_url"] = ""
             job.finished_at = _now()
             self._running = None
+            self.cleanup()  # enforce max_finished_jobs as soon as a job finishes
 
     async def _cleanup_loop(self) -> None:
         while True:

@@ -4,10 +4,11 @@ Paste a URL, crawl the site, and get a report of broken links and page-loading e
 
 ## Running locally
 
-Requires Python 3.9+ (3.11+ recommended).
+Requires Python 3.12 (the version is pinned in `.python-version`; `uv python install 3.12`
+works if you don't have it).
 
 ```sh
-python -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 
@@ -47,6 +48,8 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers
 | `MAX_LINKS_PER_PAGE` | `2000` | Links read from a single page. |
 | `MAX_EXTERNAL_PER_JOB` | `300` | External URLs checked per scan. |
 | `PER_HOST_CONCURRENCY` | `2` | Simultaneous requests to any one external host. |
+| `MAX_FINISHED_JOBS` | `30` | Finished scans kept in memory (oldest dropped first), on top of the 24 h expiry. Keeps memory bounded on the 512 MB free tier. |
+| `RENDER_GIT_COMMIT` | set by Render | Logged at startup so you can tell which commit is running. |
 
 Fixed limits: 500 pages per scan, 2 MB of HTML read per page, 10 s per request, 5 redirects,
 4 KB request body on `POST /api/jobs`.
@@ -96,3 +99,78 @@ pytest -m e2e                                  # uses installed Google Chrome
 PLAYWRIGHT_CHANNEL= pytest -m e2e              # or Playwright's Chromium (run `playwright install chromium` first)
 E2E_SCREENSHOTS=/tmp/shots pytest -m e2e       # also save screenshots
 ```
+
+## Deploying to Render
+
+The repo includes a Blueprint (`render.yaml`): one free Python web service running a single
+uvicorn worker, with `/health` as the health check.
+
+1. Push this repo to GitHub.
+2. In the Render dashboard choose **New > Blueprint**, connect the repo and pick the `main`
+   branch. Render reads `render.yaml` and shows the `fmk-link-checker` service.
+3. When asked, set `CONTACT_URL` (a page where site owners can reach you; it goes in the
+   crawler's User-Agent). Leave everything else as is and click **Apply**.
+4. Wait for the first build and deploy, then run the smoke test (below) and the
+   post-deploy checklist.
+
+Every push to `main` redeploys automatically. Python is pinned to 3.12.15 via
+`PYTHON_VERSION` in `render.yaml` and `.python-version`.
+
+What the free tier means for this app:
+
+- **It sleeps.** After 15 minutes with no traffic the service spins down; the next visit
+  takes about a minute while it wakes (the page shows "Waking up the server").
+- **Reports are temporary.** Jobs live in memory, so share links disappear when the service
+  sleeps, restarts or redeploys, and after 24 hours. Downloaded CSV/HTML files are permanent.
+- **512 MB of RAM.** A 500-page scan of a heavy site peaked around 105 MB in testing, and
+  at most 30 finished scans are kept in memory.
+- **750 free instance hours per workspace per month.** One always-awake service uses about
+  744 of them, so keeping it awake (see UptimeRobot below) leaves almost nothing for other
+  free services in the same workspace.
+
+### Smoke test
+
+```sh
+pip install httpx   # already installed if you used requirements.txt
+python scripts/smoke_test.py https://fmk-link-checker.onrender.com
+python scripts/smoke_test.py https://fmk-link-checker.onrender.com --scan-url https://example.com
+```
+
+It checks `/health` (allowing 90 s for a cold start), the main page and its security
+headers, and that SSRF payloads are rejected with 400. With `--scan-url` it also runs a
+10-page scan (no external or image checks) and verifies the CSV, HTML and share-page
+responses. It never scans anything unless you pass `--scan-url`, so only use a site you're
+allowed to crawl. Each check prints PASS or FAIL; the exit code is non-zero on any failure.
+
+### Post-deploy checklist
+
+- [ ] The smoke test passes (with and without `--scan-url`).
+- [ ] Render's logs show `Starting Link Checker (commit ...)` with the commit you pushed,
+      `TRUSTED_PROXY_HOPS=1`, and **no** `ALLOW_PRIVATE_HOSTS` warning.
+- [ ] **Verify the client IP setting.** Rate limits are per client IP, so if this is wrong
+      everyone on the team (or every visitor) shares one rate-limit bucket, and one person's
+      scans can lock everyone out.
+  1. Restart the service (Manual Deploy > Restart) so the "first 3 requests" logging resets.
+  2. Open the site from two different networks, e.g. your laptop on office Wi-Fi and your
+     phone on cellular (Wi-Fi off).
+  3. In Render's logs, find the `Client IP check: resolved=... peer=... x-forwarded-for=...`
+     lines (only the first 3 requests after startup are logged).
+  4. Look up each device's public IP (search "what is my IP" on each) and confirm
+     `resolved=` matches it for each device, and that the two devices show different IPs.
+  5. If `resolved=` shows a Render or Cloudflare address, or the same IP for both devices,
+     find the device's real IP in the raw `x-forwarded-for` list, count its position from
+     the right (rightmost = 1), set `TRUSTED_PROXY_HOPS` to that number in the dashboard,
+     redeploy and check again.
+- [ ] `CONTACT_URL` is set (the crawler's User-Agent should end in `(+https://...)`).
+- [ ] Optional: set up UptimeRobot (below).
+
+### Keeping it awake with UptimeRobot (optional)
+
+1. Create a free account at uptimerobot.com and add a new **HTTP(s)** monitor.
+2. URL: `https://<your-service>.onrender.com/health`, interval **5 minutes**.
+3. Optionally add an alert contact so you hear about outages.
+
+`/health` is cheap and exempt from rate limits. A ping every 5 minutes keeps the service from
+sleeping, at the cost of using up the workspace's free instance hours (see above). Leave it
+off if a one-minute wake-up on the first visit is acceptable.
+
