@@ -3,19 +3,1324 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Site Link Checker</title>
+  <title>Link Checker · Fly More Kites</title>
+  <meta name="description" content="Crawl a website and find broken links and page-loading errors.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 26 13H6Z' fill='%23E8506A'/%3E%3Cpath d='M6 13h20L16 24Z' fill='%23F4F27A'/%3E%3Cpath d='M16 2 26 13 16 24 6 13Z' fill='none' stroke='%231C1B3A' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M16 24c-2 2 2 3 0 6' fill='none' stroke='%23611B35' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Fraunces:opsz,wght@9..144,300;9..144,400&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ---------------------------------------------------------------------
+       Colors. Brand palette first, then semantic status colors, then the
+       role variables the UI actually uses (dark mode only remaps roles).
+       --------------------------------------------------------------------- */
+    :root {
+      /* Brand */
+      --navy: #1C1B3A;
+      --plum: #611B35;
+      --green: #2EAD54;
+      --green-hover: #279447;
+      --green-deep: #1E7D3D;        /* white text on --green is only 2.9:1, so buttons use this (5.2:1) */
+      --green-deep-hover: #186A33;
+      --butter: #F4F27A;
+      --butter-hover: #EAE75A;
+      --coral: #E8506A;
+      --lilac: #9A7BB0;
+      --lilac-deep: #7A5A92;        /* lilac is 3.6:1 on white; use this for small numerals */
+      --coral-soft: #FF8FA0;        /* coral text on plum is 3.4:1; this is 5.6:1 */
+      --cream: #F6F1E7;
+      --paper: #FFFFFF;
+      --line: #D9CDB8;
+      --ink: #1C1B3A;
+      --ink-muted: #5E5A73;
+
+      /* Status (always paired with a text label) */
+      --error: #C62F3E;
+      --error-bg: #FBE8EA;
+      --error-ink: #9E1F2D;
+      --warning: #B7791F;
+      --warning-bg: #FBF1DC;
+      --warning-ink: #74490B;
+      --success: var(--green);
+      --success-bg: #E2F4E7;
+      --success-ink: #17652F;
+
+      /* Roles */
+      --bg: var(--cream);
+      --surface: var(--paper);
+      --surface-muted: #FBF8F1;
+      --text: var(--ink);
+      --text-muted: var(--ink-muted);
+      --accent-text: var(--plum);
+      --numeral: var(--lilac-deep);
+      --border: var(--line);
+      --header-bg: var(--navy);
+      --header-text: #FFFFFF;
+      --btn-primary-bg: var(--green-deep);
+      --btn-primary-hover: var(--green-deep-hover);
+      --btn-primary-text: #FFFFFF;
+      --seg-active-bg: var(--navy);
+      --seg-active-text: var(--cream);
+      --panel-bg: var(--plum);
+      --panel-text: #FFFFFF;
+      --panel-muted: #EBD9E0;
+      --panel-line: rgba(255, 255, 255, 0.2);
+      --panel-track: rgba(255, 255, 255, 0.16);
+      --panel-alert: var(--coral-soft);
+      --focus: var(--green-deep);
+      --kite-line: var(--navy);
+      --shadow: 0 1px 2px rgba(28, 27, 58, 0.04), 0 8px 24px rgba(28, 27, 58, 0.06);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: var(--navy);
+        --surface: #27254C;
+        --surface-muted: #221F44;
+        --text: var(--cream);
+        --text-muted: #C8C2D8;
+        --accent-text: var(--butter);
+        --numeral: #B9A0CC;
+        --border: #3D3A6B;
+        --header-bg: #121130;
+        --seg-active-bg: var(--butter);
+        --seg-active-text: var(--navy);
+        --panel-bg: #6A1E3A;
+        --error-bg: #42192A;
+        --error-ink: #FFB1BA;
+        --error: #F07A88;
+        --warning-bg: #302917;
+        --warning-ink: #F6CF7A;
+        --warning: #D9A440;
+        --success-bg: #173B27;
+        --success-ink: #8BE3A6;
+        --focus: var(--butter);
+        --kite-line: var(--cream);
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.25);
+      }
+    }
+
+    /* --------------------------------------------------------------------- */
+    [hidden] { display: none !important; }
+    html, body { background: var(--bg); color: var(--text); }
+    body {
+      font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-display { font-family: "Fraunces", Georgia, "Times New Roman", serif; font-weight: 300; letter-spacing: -0.01em; }
+    .eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted); }
+    .muted { color: var(--text-muted); }
+    .accent { color: var(--accent-text); }
+    .hairline { border-color: var(--border); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    .truncate-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .break-url { overflow-wrap: anywhere; word-break: break-word; }
+
+    /* Header */
+    .site-header { background: var(--header-bg); color: var(--header-text); }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      min-height: 44px; padding: 0.8rem 1.6rem; border: 0; border-radius: 9999px;
+      font-size: 0.78rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase;
+      cursor: pointer; transition: background-color .15s ease, transform .15s ease, opacity .15s ease;
+      white-space: nowrap;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--btn-primary-bg); color: var(--btn-primary-text); }
+    .btn-primary:hover { background: var(--btn-primary-hover); }
+    .btn-secondary { background: var(--butter); color: var(--navy); }
+    .btn-secondary:hover { background: var(--butter-hover); }
+    .btn-outline { background: transparent; color: inherit; box-shadow: inset 0 0 0 1.5px currentColor; }
+    .btn-outline:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .btn[aria-disabled="true"] {
+      background: transparent; color: var(--text-muted); box-shadow: inset 0 0 0 1.5px var(--border);
+      border: 0; cursor: not-allowed; transform: none; background-image: none;
+    }
+    .btn[aria-disabled="true"]::after { content: "Soon"; font-size: 0.62rem; letter-spacing: 0.1em; padding: 0.1rem 0.45rem; border-radius: 9999px; background: var(--surface-muted); border: 1px solid var(--border); }
+    .btn .arrow { font-size: 1rem; line-height: 1; letter-spacing: 0; }
+    .link-tertiary {
+      background: none; border: 0; padding: 0.25rem 0; cursor: pointer; color: var(--text);
+      font-size: 0.78rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase;
+    }
+    .link-tertiary::before { content: "— "; }
+    .link-tertiary:hover { color: var(--accent-text); }
+
+    /* Surfaces */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 24px; box-shadow: var(--shadow); }
+    .panel-plum { background: var(--panel-bg); color: var(--panel-text); border-radius: 28px; --focus: var(--butter); }
+    .panel-plum .panel-muted { color: var(--panel-muted); }
+    .panel-plum .panel-line { border-color: var(--panel-line); }
+
+    /* URL input */
+    .url-field {
+      display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem;
+      background: var(--surface); border: 1.5px solid var(--border); border-radius: 9999px; box-shadow: var(--shadow);
+    }
+    .url-field:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
+    .url-field input {
+      flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text);
+      font-size: 1.125rem; padding: 0.6rem 1rem;
+    }
+    .url-field input::placeholder { color: var(--text-muted); opacity: 0.8; }
+    .url-field[data-invalid="true"] { border-color: var(--error); }
+    @media (max-width: 639px) {
+      .url-field { flex-direction: column; align-items: stretch; border-radius: 24px; }
+      .url-field .btn { width: 100%; }
+    }
+
+    /* Options */
+    details.options > summary { list-style: none; cursor: pointer; }
+    details.options > summary::-webkit-details-marker { display: none; }
+    details.options > summary .chev { transition: transform .2s ease; display: inline-block; }
+    details.options[open] > summary .chev { transform: rotate(90deg); }
+    .seg { display: inline-flex; padding: 4px; gap: 4px; border: 1px solid var(--border); border-radius: 9999px; background: var(--surface-muted); }
+    .seg input { position: absolute; opacity: 0; pointer-events: none; }
+    .seg label { padding: 0.45rem 1.1rem; border-radius: 9999px; font-weight: 700; font-size: 0.9rem; cursor: pointer; color: var(--text); }
+    .seg input:checked + label { background: var(--seg-active-bg); color: var(--seg-active-text); }
+    .seg input:focus-visible + label { outline: 3px solid var(--focus); outline-offset: 2px; }
+    .switch {
+      appearance: none; -webkit-appearance: none; flex: none; position: relative; cursor: pointer;
+      width: 46px; height: 28px; border-radius: 9999px; background: var(--border); transition: background-color .15s ease;
+    }
+    .switch::before {
+      content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+      background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s ease;
+    }
+    .switch:checked { background: var(--btn-primary-bg); }
+    .switch:checked::before { transform: translateX(18px); }
+
+    /* Badges */
+    .badge {
+      display: inline-flex; align-items: center; gap: 0.3rem; flex: none; white-space: nowrap;
+      padding: 0.2rem 0.65rem; border-radius: 9999px; border: 1px solid transparent;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em;
+    }
+    .badge-error { background: var(--error-bg); color: var(--error-ink); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+    .badge-warning { background: var(--warning-bg); color: var(--warning-ink); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+    .badge-neutral { background: var(--surface-muted); color: var(--text-muted); border-color: var(--border); font-weight: 500; }
+    .badge-error::before { content: "●"; font-size: 0.55rem; }
+    .badge-warning::before { content: "▲"; font-size: 0.5rem; }
+
+    /* Chips */
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; min-height: 36px;
+      border-radius: 9999px; border: 1px solid var(--border); background: var(--surface);
+      font-size: 0.85rem; font-weight: 500; color: var(--text); cursor: pointer;
+    }
+    .chip .count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .chip[aria-pressed="true"] { background: var(--seg-active-bg); border-color: var(--seg-active-bg); color: var(--seg-active-text); }
+    .chip[aria-pressed="true"] .count { color: inherit; opacity: 0.8; }
+    .chip:disabled { opacity: 0.4; cursor: default; }
+
+    .search {
+      width: 100%; padding: 0.6rem 1.1rem; border-radius: 9999px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); font-size: 0.95rem;
+    }
+    .search::placeholder { color: var(--text-muted); }
+
+    /* Progress */
+    .progress-track { height: 10px; border-radius: 9999px; background: var(--panel-track); overflow: hidden; }
+    .progress-fill { height: 100%; width: 0; border-radius: 9999px; background: var(--coral); transition: width .4s ease; }
+    .stat-num { font-variant-numeric: tabular-nums; line-height: 1; }
+
+    /* Issue rows */
+    .issue-toggle { width: 100%; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; padding: 1rem 1.25rem; }
+    .issue-toggle:hover { background: var(--surface-muted); }
+    .issue-toggle .chev { transition: transform .2s ease; color: var(--text-muted); }
+    .issue-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+    .issue-list > li + li { border-top: 1px solid var(--border); }
+    .warning-card { background: var(--warning-bg); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); border-radius: 24px; color: var(--text); }
+    .warning-card .issue-toggle:hover { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+    .warning-card .issue-list > li + li { border-top-color: color-mix(in srgb, var(--warning) 25%, transparent); }
+    .success-card { background: var(--success-bg); color: var(--success-ink); border-radius: 24px; }
+    .notice { border-radius: 16px; padding: 0.9rem 1.1rem; border: 1px solid; }
+    .notice-warning { background: var(--warning-bg); color: var(--warning-ink); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
+    .notice-error { background: var(--error-bg); color: var(--error-ink); border-color: color-mix(in srgb, var(--error) 40%, transparent); }
+    a.ext { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; }
+    a.ext:hover { text-decoration-color: currentColor; }
+
+    /* Motion */
+    .screen-in { animation: screen-in .35s ease both; }
+    @keyframes screen-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .feed-in { animation: feed-in .3s ease both; }
+    @keyframes feed-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    .kite-float { animation: kite-float 4s ease-in-out infinite; transform-origin: 50% 20%; }
+    @keyframes kite-float {
+      0%, 100% { transform: translateY(0) rotate(-4deg); }
+      50% { transform: translateY(-10px) rotate(4deg); }
+    }
+    .pulse-dot { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex items-center justify-center p-4">
-  <main class="max-w-lg w-full bg-white rounded-xl shadow p-8">
-    <h1 class="text-2xl font-semibold mb-2">Site Link Checker</h1>
-    <p class="text-slate-600 mb-6">The web interface is coming soon. The API is up:</p>
-    <ul class="font-mono text-sm space-y-1 text-slate-700">
-      <li>POST /api/jobs</li>
-      <li>GET  /api/jobs/{id}?since=N</li>
-      <li>POST /api/jobs/{id}/cancel</li>
-      <li>GET  /health</li>
-    </ul>
+<body class="min-h-screen flex flex-col">
+  <header class="site-header">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <a href="#" id="home-link" class="flex items-center gap-3" aria-label="Link Checker home">
+        <!-- Replace this inline SVG with the FMK logo file when available, e.g.
+             <img src="/static/fmk-logo.svg" alt="Fly More Kites" class="h-7 w-auto"> -->
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M16 2 26 13 16 24 6 13Z" stroke-width="2"/>
+          <path d="M16 2v22M6 13h20" stroke-width="1.4"/>
+          <path d="M16 24c-2 2 2 3 0 6" stroke-width="1.6"/>
+        </svg>
+        <span class="text-xs font-bold tracking-[0.2em] uppercase">Link Checker</span>
+      </a>
+      <span class="hidden sm:block text-xs tracking-[0.15em] uppercase opacity-80">Fly More Kites</span>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+
+    <!-- 1. START -------------------------------------------------------- -->
+    <section data-screen="start" aria-labelledby="start-title">
+      <p class="eyebrow mb-5">Site health check</p>
+      <h1 id="start-title" tabindex="-1" class="font-display text-[2.6rem] leading-[1.05] sm:text-6xl lg:text-7xl max-w-4xl outline-none">
+        Let’s find what’s broken.<br class="hidden sm:block"> <span class="accent">Before your visitors do.</span>
+      </h1>
+      <p class="muted text-lg mt-6 max-w-2xl">Paste a URL and we’ll crawl the site, check every link, and tell you what needs fixing.</p>
+
+      <form id="start-form" class="mt-10 max-w-3xl" novalidate>
+        <label for="url-input" class="eyebrow block mb-3">Website address</label>
+        <div class="url-field" id="url-field">
+          <input id="url-input" name="url" type="text" inputmode="url" autocomplete="url" spellcheck="false"
+                 autocapitalize="off" placeholder="yoursite.com" aria-describedby="url-error form-error">
+          <button type="submit" class="btn btn-primary" id="scan-btn">Scan <span class="arrow" aria-hidden="true">↘</span></button>
+        </div>
+        <p id="url-error" class="mt-3 text-sm font-medium" style="color: var(--error-ink)" hidden></p>
+        <div id="form-error" class="notice notice-error mt-4 text-sm" role="alert" hidden></div>
+
+        <details class="options mt-8 card px-5 sm:px-7 py-5" id="options">
+          <summary class="flex items-center justify-between gap-4">
+            <span class="eyebrow" style="color: var(--text)">Options</span>
+            <span class="muted text-sm flex items-center gap-2"><span id="options-summary"></span><span class="chev text-2xl leading-none" aria-hidden="true">›</span></span>
+          </summary>
+          <div class="mt-6 grid gap-7">
+            <fieldset>
+              <legend class="font-bold mb-1">Pages to crawl</legend>
+              <p class="muted text-sm mb-3">Bigger sites take longer. We stop at this many pages.</p>
+              <div class="seg" role="radiogroup" aria-label="Pages to crawl">
+                <input type="radio" name="max_pages" id="mp-100" value="100" checked><label for="mp-100">100</label>
+                <input type="radio" name="max_pages" id="mp-250" value="250"><label for="mp-250">250</label>
+                <input type="radio" name="max_pages" id="mp-500" value="500"><label for="mp-500">500</label>
+              </div>
+            </fieldset>
+            <div class="flex items-start justify-between gap-6 border-t hairline pt-6">
+              <div>
+                <label for="opt-external" class="font-bold">Check external links</label>
+                <p class="muted text-sm mt-1">Confirms links to other websites still work. We never crawl them.</p>
+              </div>
+              <input type="checkbox" role="switch" id="opt-external" class="switch" checked>
+            </div>
+            <div class="flex items-start justify-between gap-6 border-t hairline pt-6">
+              <div>
+                <label for="opt-images" class="font-bold">Check images</label>
+                <p class="muted text-sm mt-1">Also checks every image on the page loads. Slower on image-heavy sites.</p>
+              </div>
+              <input type="checkbox" role="switch" id="opt-images" class="switch">
+            </div>
+          </div>
+        </details>
+      </form>
+    </section>
+
+    <!-- 2. WAITING (waking server / queued) ------------------------------ -->
+    <section data-screen="waiting" aria-labelledby="waiting-title" hidden>
+      <div class="card max-w-2xl mx-auto px-6 sm:px-12 py-12 sm:py-16 text-center">
+        <svg class="kite-float mx-auto mb-8" width="88" height="120" viewBox="0 0 88 120" aria-hidden="true">
+          <path d="M44 4 80 44H8Z" fill="var(--coral)"/>
+          <path d="M8 44h72L44 84Z" fill="var(--butter)"/>
+          <path d="M44 4v80" stroke="var(--kite-line)" stroke-width="2"/>
+          <path d="M44 4 80 44 44 84 8 44Z" fill="none" stroke="var(--kite-line)" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M44 84c-8 8 8 12 0 20s4 10 0 14" fill="none" stroke="var(--lilac)" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M38 98l6 3M40 110l6 2" stroke="var(--coral)" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <p class="eyebrow mb-3" id="waiting-eyebrow">Hang tight</p>
+        <h2 id="waiting-title" tabindex="-1" class="font-display text-4xl sm:text-5xl outline-none">Loading your scan…</h2>
+        <p id="waiting-text" class="muted mt-4 text-lg"></p>
+        <p id="waiting-url" class="mt-6 text-sm font-medium truncate-line" hidden></p>
+        <p class="connection-note mt-4 text-sm muted" hidden>Connection hiccup, retrying…</p>
+        <div class="mt-8" id="waiting-actions" hidden>
+          <button type="button" class="btn btn-outline" data-action="cancel">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. RUNNING ------------------------------------------------------- -->
+    <section data-screen="running" aria-labelledby="running-title" hidden>
+      <div class="panel-plum px-6 sm:px-10 py-8 sm:py-10">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <p class="eyebrow flex items-center gap-2" style="color: var(--butter)">
+              <span class="pulse-dot inline-block w-2 h-2 rounded-full" style="background: var(--coral)" aria-hidden="true"></span>
+              Scanning
+            </p>
+            <h2 id="running-title" tabindex="-1" class="font-display text-3xl sm:text-5xl mt-2 break-url outline-none"></h2>
+          </div>
+          <button type="button" class="btn btn-secondary" data-action="cancel" id="running-cancel">Cancel scan</button>
+        </div>
+
+        <div class="mt-8" id="progress-region">
+          <div class="flex items-baseline justify-between gap-4 text-sm mb-2">
+            <span id="progress-label" class="font-bold"></span>
+            <span class="panel-muted">Elapsed <span id="elapsed" class="font-bold stat-num" style="color: var(--panel-text)">0:00</span></span>
+          </div>
+          <div class="progress-track" role="progressbar" id="progressbar" aria-label="Pages crawled" aria-valuemin="0">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <p class="sr-only" aria-live="polite" id="progress-announce"></p>
+        </div>
+
+        <dl class="mt-8 grid grid-cols-2 lg:grid-cols-4 gap-y-6 gap-x-6 border-t panel-line pt-8">
+          <div><dt class="eyebrow" style="color: var(--panel-muted)">Pages crawled</dt><dd class="font-display text-5xl mt-2 stat-num" style="color: var(--butter)" id="run-pages">0</dd></div>
+          <div><dt class="eyebrow" style="color: var(--panel-muted)">Links checked</dt><dd class="font-display text-5xl mt-2 stat-num" style="color: var(--butter)" id="run-links">0</dd></div>
+          <div><dt class="eyebrow" style="color: var(--panel-muted)">Errors</dt><dd class="font-display text-5xl mt-2 stat-num" style="color: var(--panel-alert)" id="run-errors">0</dd></div>
+          <div><dt class="eyebrow" style="color: var(--panel-muted)">Warnings</dt><dd class="font-display text-5xl mt-2 stat-num" id="run-warnings">0</dd></div>
+        </dl>
+
+        <div class="mt-8 border-t panel-line pt-6 min-w-0">
+          <p class="eyebrow" style="color: var(--panel-muted)">Now checking</p>
+          <p id="current-url" class="mt-2 truncate-line font-medium">Starting…</p>
+        </div>
+        <p class="connection-note mt-4 text-sm panel-muted" hidden>Connection hiccup, retrying…</p>
+      </div>
+
+      <div class="card mt-6 overflow-hidden">
+        <div class="flex items-center justify-between px-5 sm:px-7 py-4 border-b hairline">
+          <h3 class="eyebrow" style="color: var(--text)">Issues so far</h3>
+          <span class="text-sm muted" id="feed-count"></span>
+        </div>
+        <p class="px-5 sm:px-7 py-6 muted" id="feed-empty">Nothing broken yet. Fingers crossed.</p>
+        <ol class="issue-list max-h-[28rem] overflow-y-auto" id="feed" tabindex="0" aria-label="Issues found so far, newest first"></ol>
+        <p class="px-5 sm:px-7 py-3 text-sm muted border-t hairline" id="feed-more" hidden></p>
+      </div>
+    </section>
+
+    <!-- 4. RESULTS ------------------------------------------------------- -->
+    <section data-screen="results" aria-labelledby="results-title" hidden>
+      <div id="cancelled-banner" class="notice notice-warning mb-6 font-medium" role="status" hidden>
+        Scan stopped early, showing partial results.
+      </div>
+      <div class="flex flex-wrap items-end justify-between gap-6">
+        <div class="min-w-0">
+          <p class="eyebrow mb-3" id="results-eyebrow">Scan complete</p>
+          <h2 id="results-title" tabindex="-1" class="font-display text-4xl sm:text-6xl break-url outline-none"></h2>
+          <p class="muted mt-3 break-url" id="results-sub"></p>
+        </div>
+        <button type="button" class="btn btn-primary" data-action="new-scan">Scan another site <span class="arrow" aria-hidden="true">↘</span></button>
+      </div>
+
+      <dl class="mt-10 grid grid-cols-2 md:grid-cols-5 gap-4" id="summary-cards"></dl>
+      <p id="limit-note" class="mt-4 text-sm muted" hidden></p>
+
+      <div class="mt-6 flex flex-wrap gap-3">
+        <span title="Coming soon"><button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="coming-soon">Download CSV</button></span>
+        <span title="Coming soon"><button type="button" class="btn btn-secondary" aria-disabled="true" aria-describedby="coming-soon">Download HTML report</button></span>
+        <span title="Coming soon"><button type="button" class="btn btn-outline" aria-disabled="true" aria-describedby="coming-soon">Copy share link</button></span>
+        <span id="coming-soon" class="sr-only">Coming soon</span>
+      </div>
+
+      <div id="all-clear" class="success-card mt-10 px-6 sm:px-12 py-12 text-center" hidden>
+        <svg class="mx-auto mb-5" width="56" height="56" viewBox="0 0 56 56" aria-hidden="true">
+          <circle cx="28" cy="28" r="26" fill="none" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M17 29l7 7 15-16" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class="font-display text-4xl sm:text-5xl">No broken links found</p>
+        <p class="mt-3 text-lg" id="all-clear-sub">Every link we checked works. Go fly a kite.</p>
+      </div>
+
+      <div id="issues-area" class="mt-10" hidden>
+        <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+          <div class="flex flex-wrap gap-2 flex-1" id="filter-chips" role="group" aria-label="Filter by problem type"></div>
+          <div class="lg:w-72">
+            <label for="search" class="sr-only">Search URLs</label>
+            <input id="search" type="search" class="search" placeholder="Search URLs…" autocomplete="off">
+          </div>
+        </div>
+
+        <section class="mt-8" id="errors-section" aria-labelledby="errors-heading">
+          <div class="flex items-baseline justify-between mb-3">
+            <h3 id="errors-heading" class="font-display text-3xl">Broken links</h3>
+            <span class="text-sm muted" id="errors-count"></span>
+          </div>
+          <div class="card overflow-hidden"><ul class="issue-list" id="error-list"></ul></div>
+        </section>
+
+        <section class="mt-10" id="warnings-section" aria-labelledby="warnings-heading">
+          <div class="flex items-baseline justify-between mb-3">
+            <h3 id="warnings-heading" class="font-display text-2xl">Warnings</h3>
+            <span class="text-sm muted" id="warnings-count"></span>
+          </div>
+          <p class="text-sm muted mb-3">These still work, but are worth tidying up.</p>
+          <div class="warning-card overflow-hidden text-sm"><ul class="issue-list" id="warning-list"></ul></div>
+        </section>
+
+        <p id="no-matches" class="mt-8 muted" hidden>No issues match this filter.</p>
+      </div>
+    </section>
+
+    <!-- 4b. FAILED / NOT FOUND ------------------------------------------- -->
+    <section data-screen="failed" aria-labelledby="failed-title" hidden>
+      <div class="card max-w-2xl mx-auto px-6 sm:px-12 py-12 sm:py-16 text-center">
+        <p class="eyebrow mb-3" id="failed-eyebrow">Hmm</p>
+        <h2 id="failed-title" tabindex="-1" class="font-display text-4xl sm:text-5xl outline-none"></h2>
+        <p id="failed-text" class="muted mt-4 text-lg"></p>
+        <div class="mt-8">
+          <button type="button" class="btn btn-primary" data-action="new-scan">Start a new scan <span class="arrow" aria-hidden="true">↘</span></button>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <footer class="border-t hairline">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-6 text-sm muted flex flex-wrap justify-between gap-2">
+      <span>Link Checker by Fly More Kites</span>
+      <span>Reports are kept for 24 hours.</span>
+    </div>
+  </footer>
+
+  <script>
+  "use strict";
+
+  // ---------------------------------------------------------------------------
+  // Constants
+  // ---------------------------------------------------------------------------
+  const POLL_MS = 1000;
+  const HIDDEN_POLL_MS = 3000;
+  const WAKE_HINT_MS = 4000;
+  const WAKE_GIVE_UP_MS = 90000;
+  const WAKE_RETRY_MS = 2500;
+  const FEED_LIMIT = 50;
+  const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  const PREFS_KEY = "fmk-link-checker:prefs";
+  const TRANSIENT_STATUSES = new Set([502, 503, 504]);
+  const FINISHED = new Set(["done", "cancelled", "failed"]);
+
+  const TYPE_INFO = {
+    http_4xx:           { label: "Client error",       tone: "error" },
+    http_5xx:           { label: "Server error",       tone: "error" },
+    timeout:            { label: "Timeout",            tone: "error" },
+    dns_error:          { label: "DNS failure",        tone: "error" },
+    ssl_error:          { label: "SSL error",          tone: "error" },
+    connection_error:   { label: "Connection failed",  tone: "error" },
+    too_many_redirects: { label: "Too many redirects", tone: "error" },
+    redirect_chain:     { label: "Redirect chain",     tone: "warning" },
+    blocked:            { label: "Blocked",            tone: "warning" },
+  };
+  const TYPE_ORDER = Object.keys(TYPE_INFO);
+
+  const FILTERS = [
+    { key: "all",       label: "All",                test: () => true },
+    { key: "404",       label: "404",                test: (g) => g.type === "http_4xx" && g.status === 404 },
+    { key: "4xx",       label: "4xx other",          test: (g) => g.type === "http_4xx" && g.status !== 404 },
+    { key: "5xx",       label: "5xx",                test: (g) => g.type === "http_5xx" },
+    { key: "timeout",   label: "Timeout",            test: (g) => g.type === "timeout" },
+    { key: "dns",       label: "DNS",                test: (g) => g.type === "dns_error" },
+    { key: "ssl",       label: "SSL",                test: (g) => g.type === "ssl_error" },
+    { key: "conn",      label: "Connection",         test: (g) => g.type === "connection_error", hideIfEmpty: true },
+    { key: "toomany",   label: "Too many redirects", test: (g) => g.type === "too_many_redirects" },
+    { key: "chain",     label: "Redirect chain",     test: (g) => g.type === "redirect_chain" },
+    { key: "blocked",   label: "Blocked",            test: (g) => g.type === "blocked", hideIfEmpty: true },
+  ];
+
+  const KIND_LABEL = { page: "Page", external: "External", image: "Image" };
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  const state = {
+    generation: 0,        // bumped whenever we navigate; stale responses are ignored
+    jobId: null,
+    job: null,            // latest payload (its `issues` are only the newest slice)
+    issues: [],           // every issue received so far
+    since: 0,
+    polling: false,
+    pollTimer: null,
+    inFlightGen: null,
+    netFailures: 0,
+    stopping: false,
+    screen: null,
+    elapsedTimer: null,
+    serverOffsetMs: 0,    // server clock minus client clock, from the Date header
+    lastAnnounced: -1,
+    filter: "all",
+    search: "",
+    expanded: new Set(),
+  };
+
+  // ---------------------------------------------------------------------------
+  // Small helpers
+  // ---------------------------------------------------------------------------
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Builds elements without ever parsing HTML; strings become text nodes.
+  function h(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value == null || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key === "text") node.textContent = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child == null || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+
+  function isHttpUrl(value) {
+    try {
+      const { protocol } = new URL(value);
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  // Crawled URLs are untrusted: only http(s) becomes a clickable link.
+  function safeLink(url, className = "ext break-url") {
+    if (!isHttpUrl(url)) return h("span", { class: "break-url", text: url });
+    return h("a", { href: url, target: "_blank", rel: "noopener noreferrer", class: className, text: url });
+  }
+
+  function hostOf(url) {
+    try { return new URL(url).host; } catch { return url; }
+  }
+
+  function plural(n, one, many = one + "s") {
+    return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+  }
+
+  function formatClock(totalSeconds) {
+    const s = Math.max(0, Math.floor(totalSeconds));
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  function formatDuration(seconds) {
+    if (seconds == null) return "—";
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const m = Math.floor(seconds / 60);
+    return `${m}m ${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
+  }
+
+  function formatMs(ms) {
+    if (ms == null) return null;
+    return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)} ms`;
+  }
+
+  function isWarningType(type) {
+    return TYPE_INFO[type]?.tone === "warning";
+  }
+
+  function badgeFor(issue) {
+    const type = issue.type ?? issue.issue_type;
+    const status = issue.status ?? issue.status_code;
+    const info = TYPE_INFO[type] || { label: type, tone: "error" };
+    const isHttp = type === "http_4xx" || type === "http_5xx";
+    const text = isHttp && status ? `${status} ${status === 404 ? "Not found" : info.label}` : info.label;
+    return h("span", { class: `badge badge-${info.tone}`, text });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Preferences (localStorage can throw in private mode etc.)
+  // ---------------------------------------------------------------------------
+  function loadPrefs() {
+    try {
+      return JSON.parse(localStorage.getItem(PREFS_KEY)) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function savePrefs(prefs) {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
+  }
+
+  // ---------------------------------------------------------------------------
+  // API
+  // ---------------------------------------------------------------------------
+  class NetworkError extends Error {}
+
+  async function api(path, options = {}) {
+    let res;
+    try {
+      res = await fetch(path, {
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        ...options,
+      });
+    } catch {
+      throw new NetworkError("Network request failed");
+    }
+    const date = Date.parse(res.headers.get("date") || "");
+    if (!Number.isNaN(date)) state.serverOffsetMs = date - Date.now();
+    let data = null;
+    try { data = await res.json(); } catch { /* non-JSON (e.g. proxy error page) */ }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  const createJob = (body) => api("/api/jobs", { method: "POST", body: JSON.stringify(body) });
+  const fetchJob = (id, since) => api(`/api/jobs/${encodeURIComponent(id)}?since=${since}`);
+  const cancelJobRequest = (id) => api(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+
+  function errorMessage(res, fallback = "Something went wrong. Please try again.") {
+    const msg = res?.data?.error;
+    if (typeof msg !== "string" || !msg) return fallback;
+    return msg.replace(/^url:\s*/, "");
+  }
+
+  // Free-tier hosts sleep when idle. If the first request is slow or fails,
+  // say so and keep retrying for up to a minute and a half.
+  async function withWakeUp(request, gen, waitingUrl) {
+    const started = Date.now();
+    const hint = setTimeout(() => {
+      if (gen === state.generation) renderWaking(waitingUrl);
+    }, WAKE_HINT_MS);
+    try {
+      for (;;) {
+        try {
+          const res = await request();
+          if (!TRANSIENT_STATUSES.has(res.status)) return res;
+        } catch (err) {
+          if (!(err instanceof NetworkError)) throw err;
+        }
+        if (gen !== state.generation) return null;
+        renderWaking(waitingUrl);
+        if (Date.now() - started > WAKE_GIVE_UP_MS) {
+          return { ok: false, status: 0, data: { error: "We couldn’t reach the server. Please try again in a minute." } };
+        }
+        await sleep(WAKE_RETRY_MS);
+        if (gen !== state.generation) return null;
+      }
+    } finally {
+      clearTimeout(hint);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Screens
+  // ---------------------------------------------------------------------------
+  function showScreen(name) {
+    if (state.screen === name) return;
+    state.screen = name;
+    for (const section of $$("[data-screen]")) {
+      const active = section.dataset.screen === name;
+      section.hidden = !active;
+      section.classList.toggle("screen-in", active);
+    }
+    if (name !== "running") stopElapsedTimer();
+    const heading = $(`[data-screen="${name}"] [tabindex="-1"]`);
+    // Move focus for screen readers, except on first paint of the start screen.
+    if (heading && !(name === "start" && document.activeElement === document.body)) {
+      heading.focus({ preventScroll: true });
+    }
+    window.scrollTo({ top: 0 });
+  }
+
+  function setConnectionNote(visible) {
+    for (const note of $$(".connection-note")) note.hidden = !visible;
+  }
+
+  // --- Start -----------------------------------------------------------------
+
+  function selectedOptions() {
+    return {
+      max_pages: Number($('input[name="max_pages"]:checked').value),
+      check_external: $("#opt-external").checked,
+      check_images: $("#opt-images").checked,
+    };
+  }
+
+  function applyPrefs(prefs) {
+    const radio = $(`input[name="max_pages"][value="${Number(prefs.max_pages) || 100}"]`);
+    if (radio) radio.checked = true;
+    if (typeof prefs.check_external === "boolean") $("#opt-external").checked = prefs.check_external;
+    if (typeof prefs.check_images === "boolean") $("#opt-images").checked = prefs.check_images;
+    renderOptionsSummary();
+  }
+
+  function renderOptionsSummary() {
+    const o = selectedOptions();
+    const parts = [`${o.max_pages} pages`];
+    if (o.check_external) parts.push("external");
+    if (o.check_images) parts.push("images");
+    $("#options-summary").textContent = parts.join(" · ");
+  }
+
+  function showFieldError(message) {
+    const el = $("#url-error");
+    el.textContent = message || "";
+    el.hidden = !message;
+    $("#url-field").dataset.invalid = message ? "true" : "false";
+    $("#url-input").setAttribute("aria-invalid", message ? "true" : "false");
+  }
+
+  function showFormError(message) {
+    const el = $("#form-error");
+    el.textContent = message || "";
+    el.hidden = !message;
+  }
+
+  // Mirrors the server: assume https:// if no scheme, require http(s) and a host.
+  function checkUrlInput(raw) {
+    const value = raw.trim();
+    if (!value) return { error: "Enter a website address, like yoursite.com" };
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+    let url;
+    try { url = new URL(withScheme); } catch { return { error: "That doesn’t look like a web address." }; }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return { error: "Only http:// and https:// addresses can be scanned." };
+    if (!url.hostname || /\s/.test(value)) return { error: "That doesn’t look like a web address." };
+    return { value: withScheme };
+  }
+
+  function showStart({ focus = false } = {}) {
+    stopPolling();
+    state.generation++;
+    state.jobId = null;
+    state.job = null;
+    setSubmitting(false);
+    showScreen("start");
+    if (focus) $("#url-input").focus();
+  }
+
+  function setSubmitting(busy) {
+    const btn = $("#scan-btn");
+    btn.disabled = busy;
+    btn.firstChild.textContent = busy ? "Starting… " : "Scan ";
+  }
+
+  async function onStartSubmit(event) {
+    event.preventDefault();
+    showFormError("");
+    const checked = checkUrlInput($("#url-input").value);
+    if (checked.error) {
+      showFieldError(checked.error);
+      $("#url-input").focus();
+      return;
+    }
+    showFieldError("");
+    const options = selectedOptions();
+    savePrefs(options);
+
+    setSubmitting(true);
+    const gen = ++state.generation;
+    const res = await withWakeUp(() => createJob({ url: checked.value, ...options }), gen, checked.value);
+    if (gen !== state.generation || !res) return;
+    setSubmitting(false);
+
+    if (!res.ok) {
+      showScreen("start");
+      if (res.status === 422 || res.status === 400) showFieldError(errorMessage(res));
+      else if (res.status === 429) showFormError(errorMessage(res, "Lots of people are scanning right now. Please try again in a few minutes."));
+      else showFormError(errorMessage(res));
+      return;
+    }
+    history.pushState(null, "", `#/job/${encodeURIComponent(res.data.id)}`);
+    openJob(res.data.id);
+  }
+
+  // --- Waiting -----------------------------------------------------------------
+
+  function renderWaitingScreen({ eyebrow, title, text, url, cancellable }) {
+    $("#waiting-eyebrow").textContent = eyebrow;
+    $("#waiting-title").textContent = title;
+    $("#waiting-text").textContent = text || "";
+    const urlEl = $("#waiting-url");
+    urlEl.textContent = url || "";
+    urlEl.title = url || "";
+    urlEl.hidden = !url;
+    $("#waiting-actions").hidden = !cancellable;
+    const cancelBtn = $("#waiting-actions [data-action=cancel]");
+    cancelBtn.disabled = state.stopping;
+    cancelBtn.textContent = state.stopping ? "Cancelling…" : "Cancel";
+    showScreen("waiting");
+  }
+
+  function renderLoading() {
+    renderWaitingScreen({ eyebrow: "One moment", title: "Loading your scan…" });
+  }
+
+  function renderWaking(url) {
+    renderWaitingScreen({
+      eyebrow: "Hang tight",
+      title: "Waking up the server…",
+      text: "This can take up to a minute on the first visit.",
+      url,
+    });
+  }
+
+  function renderQueued(job) {
+    const pos = job.queue_position;
+    renderWaitingScreen({
+      eyebrow: "In the queue",
+      title: pos ? `You’re #${pos} in line` : "You’re next in line",
+      text: "Another scan is running. Yours will start automatically, so feel free to keep this tab open.",
+      url: job.url,
+      cancellable: true,
+    });
+  }
+
+  // --- Running -----------------------------------------------------------------
+
+  function resetFeed() {
+    $("#feed").replaceChildren();
+    state.lastAnnounced = -1;
+  }
+
+  function renderRunning(job, newIssues) {
+    const firstPaint = state.screen !== "running";
+    const { stats, options } = job;
+    $("#running-title").textContent = hostOf(job.url);
+    $("#run-pages").textContent = stats.pages_crawled.toLocaleString();
+    $("#run-links").textContent = stats.links_checked.toLocaleString();
+    $("#run-errors").textContent = stats.errors_found.toLocaleString();
+    $("#run-warnings").textContent = stats.warnings_found.toLocaleString();
+
+    const max = options.max_pages;
+    const pages = Math.min(stats.pages_crawled, max);
+    const label = `${pages.toLocaleString()} of up to ${max.toLocaleString()} pages`;
+    $("#progress-label").textContent = label;
+    $("#progress-fill").style.width = `${(pages / max) * 100}%`;
+    const bar = $("#progressbar");
+    bar.setAttribute("aria-valuemax", String(max));
+    bar.setAttribute("aria-valuenow", String(pages));
+    bar.setAttribute("aria-valuetext", label);
+    announceProgress(stats);
+
+    const current = $("#current-url");
+    current.textContent = stats.current_url || "Starting…";
+    current.title = stats.current_url || "";
+
+    const cancelBtn = $("#running-cancel");
+    cancelBtn.disabled = state.stopping;
+    cancelBtn.textContent = state.stopping ? "Stopping…" : "Cancel scan";
+
+    appendToFeed(newIssues);
+    showScreen("running");
+    if (firstPaint) startElapsedTimer(job);
+  }
+
+  // Announce every 10 pages and whenever the error count changes, not every poll.
+  function announceProgress(stats) {
+    const bucket = Math.floor(stats.pages_crawled / 10) * 1000 + stats.errors_found;
+    if (bucket === state.lastAnnounced) return;
+    state.lastAnnounced = bucket;
+    $("#progress-announce").textContent =
+      `Scanned ${plural(stats.pages_crawled, "page")}, ${plural(stats.errors_found, "error")} so far.`;
+  }
+
+  function appendToFeed(newIssues) {
+    const feed = $("#feed");
+    for (const issue of newIssues) {
+      feed.prepend(renderFeedItem(issue));
+    }
+    while (feed.children.length > FEED_LIMIT) feed.lastElementChild.remove();
+    const total = state.issues.length;
+    const hidden = total - feed.children.length;
+    $("#feed-empty").hidden = total > 0;
+    $("#feed-count").textContent = total ? plural(total, "issue") : "";
+    const more = $("#feed-more");
+    more.hidden = hidden <= 0;
+    more.textContent = hidden > 0 ? `+${hidden.toLocaleString()} more (full list when the scan finishes)` : "";
+  }
+
+  function renderFeedItem(issue) {
+    const meta = [KIND_LABEL[issue.kind] || issue.kind];
+    if (issue.found_on) meta.push(`on ${issue.found_on}`);
+    return h("li", { class: "feed-in px-5 sm:px-7 py-3 flex flex-col sm:flex-row sm:items-center gap-x-3 gap-y-1.5 min-w-0" },
+      h("div", {}, badgeFor(issue)),
+      h("div", { class: "min-w-0 flex-1 w-full" },
+        h("p", { class: "truncate-line font-medium", title: issue.url, text: issue.url }),
+        h("p", { class: "truncate-line text-xs muted", title: meta.join(" "), text: meta.join(" · ") }),
+      ),
+    );
+  }
+
+  function startElapsedTimer(job) {
+    stopElapsedTimer();
+    const tick = () => {
+      const started = Date.parse(state.job?.started_at || job.started_at || "");
+      if (Number.isNaN(started)) return;
+      const now = Date.now() + state.serverOffsetMs;
+      $("#elapsed").textContent = formatClock((now - started) / 1000);
+    };
+    tick();
+    state.elapsedTimer = setInterval(tick, 1000);
+  }
+
+  function stopElapsedTimer() {
+    clearInterval(state.elapsedTimer);
+    state.elapsedTimer = null;
+  }
+
+  // --- Results -----------------------------------------------------------------
+
+  function groupIssues(issues) {
+    const groups = new Map();
+    for (const issue of issues) {
+      let g = groups.get(issue.url);
+      if (!g) {
+        g = {
+          url: issue.url,
+          type: issue.issue_type,
+          status: issue.status_code,
+          error: issue.error,
+          kind: issue.kind,
+          responseMs: issue.response_time_ms,
+          chain: issue.redirect_chain || [],
+          occurrences: [],
+        };
+        groups.set(issue.url, g);
+      }
+      g.occurrences.push({ foundOn: issue.found_on, text: issue.link_text });
+    }
+    return Array.from(groups.values()).sort((a, b) =>
+      TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || (a.status || 0) - (b.status || 0) || a.url.localeCompare(b.url));
+  }
+
+  function renderResults(job) {
+    const groups = groupIssues(state.issues);
+    const errors = groups.filter((g) => !isWarningType(g.type));
+    const warnings = groups.filter((g) => isWarningType(g.type));
+    const cancelled = job.status === "cancelled";
+
+    $("#cancelled-banner").hidden = !cancelled;
+    $("#cancelled-banner").textContent = job.error_message || "Scan stopped early, showing partial results.";
+    $("#results-eyebrow").textContent = cancelled ? "Partial results" : "Scan complete";
+    $("#results-title").textContent = errors.length
+      ? `${plural(errors.length, "broken link")} on ${hostOf(job.url)}`
+      : hostOf(job.url);
+    $("#results-sub").textContent = job.url;
+
+    renderSummaryCards(job, errors, warnings);
+
+    const limitNote = $("#limit-note");
+    limitNote.hidden = !job.summary?.page_limit_reached;
+    limitNote.textContent = `Stopped at the ${job.options.max_pages}-page limit, so some pages weren’t checked.`;
+
+    $("#all-clear").hidden = errors.length > 0;
+    $("#all-clear-sub").textContent = warnings.length
+      ? `Every link we checked works. A few redirects could be tidied up below.`
+      : cancelled ? "None so far in the pages we reached." : "Every link we checked works. Go fly a kite.";
+    $("#issues-area").hidden = groups.length === 0;
+
+    state.groups = groups;
+    if (!FILTERS.some((f) => f.key === state.filter)) state.filter = "all";
+    renderFilterChips(groups);
+    renderIssueLists();
+    showScreen("results");
+  }
+
+  function renderSummaryCards(job, errors, warnings) {
+    const occurrences = (list) => list.reduce((n, g) => n + g.occurrences.length, 0);
+    const cards = [
+      ["Pages crawled", job.stats.pages_crawled.toLocaleString(), null],
+      ["Links checked", job.stats.links_checked.toLocaleString(), null],
+      ["Broken links", errors.length.toLocaleString(), errors.length ? `in ${plural(occurrences(errors), "place")}` : null],
+      ["Warnings", warnings.length.toLocaleString(), warnings.length ? "redirect chains & more" : null],
+      ["Duration", formatDuration(job.summary?.duration_s), null],
+    ];
+    $("#summary-cards").replaceChildren(...cards.map(([label, value, sub], i) =>
+      h("div", { class: `card px-5 py-5 ${i === 4 ? "col-span-2 md:col-span-1" : ""}` },
+        h("dt", { class: "eyebrow", text: label }),
+        h("dd", { class: "font-display text-4xl sm:text-5xl mt-3 stat-num", style: i === 2 && errors.length ? "color: var(--error-ink)" : null, text: value }),
+        sub ? h("dd", { class: "text-xs muted mt-2", text: sub }) : null,
+      )));
+  }
+
+  function renderFilterChips(groups) {
+    const chips = FILTERS.map((f) => {
+      const count = groups.filter(f.test).length;
+      if (f.hideIfEmpty && count === 0) return null;
+      return h("button", {
+        type: "button",
+        class: "chip",
+        "aria-pressed": String(state.filter === f.key),
+        disabled: count === 0 && f.key !== "all",
+        onclick: () => { state.filter = f.key; renderFilterChips(groups); renderIssueLists(); },
+      }, f.label, h("span", { class: "count", text: String(count) }));
+    });
+    $("#filter-chips").replaceChildren(...chips.filter(Boolean));
+  }
+
+  function renderIssueLists() {
+    const filter = FILTERS.find((f) => f.key === state.filter) || FILTERS[0];
+    const query = state.search.trim().toLowerCase();
+    const matches = (g) => filter.test(g) && (!query ||
+      g.url.toLowerCase().includes(query) ||
+      g.occurrences.some((o) => (o.foundOn || "").toLowerCase().includes(query)));
+    const visible = (state.groups || []).filter(matches);
+    const errors = visible.filter((g) => !isWarningType(g.type));
+    const warnings = visible.filter((g) => isWarningType(g.type));
+
+    $("#errors-section").hidden = errors.length === 0;
+    $("#errors-count").textContent = plural(errors.length, "URL");
+    $("#error-list").replaceChildren(...errors.map((g, i) => renderGroup(g, `e${i}`)));
+
+    $("#warnings-section").hidden = warnings.length === 0;
+    $("#warnings-count").textContent = plural(warnings.length, "URL");
+    $("#warning-list").replaceChildren(...warnings.map((g, i) => renderGroup(g, `w${i}`)));
+
+    $("#no-matches").hidden = visible.length > 0;
+  }
+
+  function renderGroup(g, idSuffix) {
+    const pages = new Set(g.occurrences.map((o) => o.foundOn || "(start URL)")).size;
+    const detailsId = `issue-details-${idSuffix}`;
+    const expanded = state.expanded.has(g.url);
+    const meta = [KIND_LABEL[g.kind] || g.kind, formatMs(g.responseMs), `Found on ${plural(pages, "page")}`].filter(Boolean);
+
+    const details = h("div", { id: detailsId, class: "px-5 sm:px-7 pb-5 pt-1 text-sm", hidden: !expanded },
+      h("p", { class: "mb-3" }, h("span", { class: "muted", text: "URL: " }), safeLink(g.url)),
+      g.error && !/^http_/.test(g.type) ? h("p", { class: "muted mb-3 break-url", text: g.error }) : null,
+      g.chain.length ? renderChain(g.chain) : null,
+      h("p", { class: "eyebrow mt-4 mb-2", text: "Found on" }),
+      h("ul", { class: "grid gap-2" }, g.occurrences.map(renderOccurrence)),
+    );
+
+    const toggle = h("button", {
+      type: "button",
+      class: "issue-toggle flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-2",
+      "aria-expanded": String(expanded),
+      "aria-controls": detailsId,
+      onclick: () => {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(open));
+        details.hidden = !open;
+        if (open) state.expanded.add(g.url); else state.expanded.delete(g.url);
+      },
+    },
+      h("span", { class: "order-1" }, badgeFor(g)),
+      h("span", { class: "min-w-0 flex-1 order-3 basis-full sm:basis-auto sm:order-2" },
+        h("span", { class: "block font-medium break-url", text: g.url }),
+        h("span", { class: "block text-xs muted mt-1", text: meta.join(" · ") }),
+      ),
+      h("span", { class: "chev text-2xl leading-none order-2 ml-auto sm:order-3", "aria-hidden": "true", text: "›" }),
+    );
+    return h("li", {}, toggle, details);
+  }
+
+  function renderOccurrence(o) {
+    return h("li", { class: "flex flex-col sm:flex-row sm:items-baseline gap-x-3 gap-y-0.5" },
+      o.foundOn ? safeLink(o.foundOn) : h("span", { class: "muted", text: "The start URL itself" }),
+      o.text ? h("span", { class: "muted break-url", text: `“${o.text}”` }) : null,
+    );
+  }
+
+  function renderChain(chain) {
+    return h("div", { class: "mb-2" },
+      h("p", { class: "eyebrow mb-2", text: `Redirect chain · ${plural(chain.length - 1, "hop")}` }),
+      h("ol", { class: "grid gap-1.5" }, chain.map((hop, i) =>
+        h("li", { class: "flex items-baseline gap-2" },
+          h("span", { class: "font-display stat-num", style: "color: var(--numeral)", text: `${i + 1}.` }),
+          h("span", { class: "badge badge-neutral", text: hop.status_code ? String(hop.status_code) : "?" }),
+          safeLink(hop.url),
+        ))),
+    );
+  }
+
+  // --- Failed / not found --------------------------------------------------------
+
+  function renderFailed({ eyebrow = "Hmm", title, text }) {
+    stopPolling();
+    $("#failed-eyebrow").textContent = eyebrow;
+    $("#failed-title").textContent = title;
+    $("#failed-text").textContent = text;
+    showScreen("failed");
+  }
+
+  function renderNotFound() {
+    renderFailed({
+      eyebrow: "Report not found",
+      title: "We couldn’t find that scan",
+      text: "Reports are kept for 24 hours and can be lost when the server restarts. Start a new scan to get a fresh one.",
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Polling
+  // ---------------------------------------------------------------------------
+  function openJob(id) {
+    stopPolling();
+    const gen = ++state.generation;
+    Object.assign(state, {
+      jobId: id, job: null, issues: [], since: 0, stopping: false, netFailures: 0,
+      filter: "all", search: "", expanded: new Set(), groups: [],
+    });
+    $("#search").value = "";
+    resetFeed();
+    setConnectionNote(false);
+    if (!JOB_ID_RE.test(id)) return renderNotFound();
+    state.screen = null;
+    renderLoading();
+    state.polling = true;
+    firstPoll(gen);
+  }
+
+  async function firstPoll(gen) {
+    state.inFlightGen = gen;
+    let res;
+    try {
+      res = await withWakeUp(() => fetchJob(state.jobId, state.since), gen);
+    } finally {
+      if (state.inFlightGen === gen) state.inFlightGen = null;
+    }
+    if (gen !== state.generation || !res) return;
+    if (res.status === 0) return renderFailed({ title: "Can’t reach the server", text: errorMessage(res) });
+    handleJobResponse(res, gen);
+  }
+
+  async function poll(gen) {
+    if (gen !== state.generation || state.inFlightGen === gen) return;
+    state.inFlightGen = gen;
+    let res = null;
+    try {
+      res = await fetchJob(state.jobId, state.since);
+    } catch {
+      res = null;  // network blip
+    } finally {
+      if (state.inFlightGen === gen) state.inFlightGen = null;
+    }
+    if (gen !== state.generation) return;
+    if (!res || TRANSIENT_STATUSES.has(res.status) || res.status >= 500) {
+      state.netFailures++;
+      setConnectionNote(state.netFailures >= 2);
+      scheduleNext(gen);
+      return;
+    }
+    handleJobResponse(res, gen);
+  }
+
+  function handleJobResponse(res, gen) {
+    if (res.status === 404) return renderNotFound();
+    if (!res.ok || !res.data) {
+      return renderFailed({ title: "Something went wrong", text: errorMessage(res) });
+    }
+    const job = res.data;
+    const fresh = Array.isArray(job.issues) ? job.issues : [];
+    if (job.next_since >= state.since) {
+      state.issues.push(...fresh);
+      state.since = job.next_since;
+    }
+    state.job = job;
+    state.netFailures = 0;
+    setConnectionNote(false);
+
+    switch (job.status) {
+      case "queued":
+        renderQueued(job);
+        break;
+      case "running":
+        renderRunning(job, fresh);
+        break;
+      case "done":
+      case "cancelled":
+        if (job.status === "cancelled" && !job.started_at) {
+          renderFailed({ eyebrow: "Cancelled", title: "Scan cancelled", text: "This scan was cancelled before it started." });
+        } else {
+          renderResults(job);
+        }
+        break;
+      case "failed":
+        renderFailed({
+          eyebrow: "Scan failed",
+          title: "This scan couldn’t finish",
+          text: job.error_message || "Something went wrong while scanning. Please try again.",
+        });
+        break;
+    }
+
+    if (FINISHED.has(job.status)) stopPolling();
+    else scheduleNext(gen);
+  }
+
+  function scheduleNext(gen) {
+    clearTimeout(state.pollTimer);
+    if (!state.polling || gen !== state.generation) return;
+    state.pollTimer = setTimeout(() => poll(gen), document.hidden ? HIDDEN_POLL_MS : POLL_MS);
+  }
+
+  function pollSoon() {
+    if (!state.polling || state.inFlightGen === state.generation) return;
+    clearTimeout(state.pollTimer);
+    poll(state.generation);
+  }
+
+  function stopPolling() {
+    state.polling = false;
+    clearTimeout(state.pollTimer);
+    stopElapsedTimer();
+  }
+
+  async function onCancel() {
+    if (!state.jobId || state.stopping) return;
+    state.stopping = true;
+    for (const btn of $$("[data-action=cancel]")) {
+      btn.disabled = true;
+      btn.textContent = state.screen === "running" ? "Stopping…" : "Cancelling…";
+    }
+    try {
+      const res = await cancelJobRequest(state.jobId);
+      if (res.status === 404) return renderNotFound();
+    } catch {
+      // Keep polling; the next poll shows the real state.
+    }
+    pollSoon();  // the API flips running -> cancelled within about a second
+  }
+
+  // ---------------------------------------------------------------------------
+  // Routing (#/job/<id>)
+  // ---------------------------------------------------------------------------
+  function route() {
+    const match = location.hash.match(/^#\/job\/(.+)$/);
+    if (!match) return showStart();
+    let id;
+    try { id = decodeURIComponent(match[1]); } catch { id = ""; }
+    if (id !== state.jobId) openJob(id);
+  }
+
+  function goToStart() {
+    history.pushState(null, "", location.pathname + location.search);
+    showStart({ focus: true });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Init
+  // ---------------------------------------------------------------------------
+  function init() {
+    applyPrefs(loadPrefs());
+    $("#start-form").addEventListener("submit", onStartSubmit);
+    $("#url-input").addEventListener("input", () => { showFieldError(""); showFormError(""); });
+    for (const input of $$("#options input")) input.addEventListener("change", () => { renderOptionsSummary(); savePrefs(selectedOptions()); });
+    $("#search").addEventListener("input", (e) => { state.search = e.target.value; renderIssueLists(); });
+    $("#home-link").addEventListener("click", (e) => { e.preventDefault(); goToStart(); });
+    document.addEventListener("click", (e) => {
+      const action = e.target.closest("[data-action]")?.dataset.action;
+      if (action === "cancel") onCancel();
+      else if (action === "new-scan") goToStart();
+    });
+    // "Coming soon" buttons are aria-disabled (not disabled) so their tooltip still shows.
+    for (const btn of $$('button[aria-disabled="true"]')) btn.addEventListener("click", (e) => e.preventDefault());
+    window.addEventListener("hashchange", route);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) pollSoon(); });
+    route();
+  }
+
+  init();
+  </script>
 </body>
 </html>

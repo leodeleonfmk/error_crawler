@@ -244,7 +244,7 @@ async def test_health_and_index(env):
     client, _, _ = env
     assert (await client.get("/health")).json() == {"status": "ok"}
     resp = await client.get("/")
-    assert resp.status_code == 200 and "Site Link Checker" in resp.text
+    assert resp.status_code == 200 and "<title>Link Checker" in resp.text
 
 
 async def test_safety_timeout_cancels_with_partial_results():
